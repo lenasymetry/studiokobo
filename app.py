@@ -755,8 +755,8 @@ def calculate_all_project_parts():
                     legrabox_spec = legrabox_specs.get(tech_type, legrabox_specs['K'])
                     fixed_back_h = legrabox_spec['back_height']
                 elif drawer_system == 'ANGLAISE':
-                    # ANGLAISE : face commence à 40mm de chaque montant adjacent
-                    drawer_face_width = max(0.0, zone_width_total - 80.0)
+                    # ANGLAISE : 2 mm de jeu de chaque côté par rapport aux montants adjacents
+                    drawer_face_width = max(0.0, zone_width_total - 4.0)
                     drawer_back_width = max(0.0, drawer_face_width - 40.0)
                     back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
                     fixed_back_h = back_height_map.get(tech_type, 116.0)
@@ -2908,13 +2908,14 @@ with col2:
                         
                         if drawer_system == 'ANGLAISE':
                             # TIROIR À L'ANGLAISE : face posée 40mm à l'intérieur du caisson
-                            # Largeur face = largeur zone - 80mm (40mm retrait de chaque montant)
-                            anglaise_inset = 40.0 * unit_factor
-                            dW_zone = max(0.0, zone_width_abs - 2.0 * anglaise_inset)
-                            drawer_x_start = zone_x_min_abs + anglaise_inset
+                            # Largeur face = largeur zone - 4mm (2mm de jeu de chaque côté)
+                            anglaise_inset_depth = 40.0 * unit_factor
+                            anglaise_side_gap = 2.0 * unit_factor
+                            dW_zone = max(0.0, zone_width_abs - 2.0 * anglaise_side_gap)
+                            drawer_x_start = zone_x_min_abs + anglaise_side_gap
                             # Face à 40mm de profondeur depuis la façade
                             drawer_depth = drp.get('drawer_face_thickness', 19.0) * unit_factor
-                            drawer_y_pos = o[1] + anglaise_inset
+                            drawer_y_pos = o[1] + anglaise_inset_depth
                         elif is_applique:
                             # Mode EN APPLIQUE : recouvrir les montants adjacents des deux côtés
                             # Avec jeu de pose latéral: 2 mm de chaque côté
@@ -2967,12 +2968,13 @@ with col2:
                         drawer_z_pos = o[2] + (drp.get('drawer_bottom_offset', 0.0) * unit_factor)
                         
                         if drawer_system == 'ANGLAISE':
-                            # TIROIR À L'ANGLAISE : 40mm inside, width = L - 80mm
-                            anglaise_inset = 40.0 * unit_factor
-                            dW_zone = max(0.0, L - 2.0 * anglaise_inset)
-                            drawer_x_start = o[0] + anglaise_inset
+                            # TIROIR À L'ANGLAISE : 40mm inside, 2mm de jeu latéral de chaque côté
+                            anglaise_inset_depth = 40.0 * unit_factor
+                            anglaise_side_gap = 2.0 * unit_factor
+                            dW_zone = max(0.0, L - 2.0 * anglaise_side_gap)
+                            drawer_x_start = o[0] + anglaise_side_gap
                             drawer_depth = drp.get('drawer_face_thickness', 19.0) * unit_factor
-                            drawer_y_pos = o[1] + anglaise_inset
+                            drawer_y_pos = o[1] + anglaise_inset_depth
                         elif is_applique:
                             # Mode EN APPLIQUE : recouvrir toute la largeur + épaisseurs montants + 1mm jeu
                             t_montant_mm = float(cab_render['dims'].get('t_lr_raw', 19.0))
