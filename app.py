@@ -2884,11 +2884,11 @@ with col2:
                         is_applique = bool(drp.get('_applique_mode', False))
                         
                         if is_applique:
-                            # Mode EN APPLIQUE : laisser 2 mm de jeu de chaque côté de la zone
-                            # Largeur façade = largeur zone - 4 mm (2 mm gauche + 2 mm droite)
-                            side_clearance = 2.0 * unit_factor
-                            dW_zone = max(0.0, zone_width_abs - (2.0 * side_clearance))
-                            drawer_x_start = zone_x_min_abs + side_clearance
+                            # Mode EN APPLIQUE : recouvrir les montants adjacents des deux côtés
+                            # Largeur façade = largeur zone + 2x épaisseur montant
+                            t_montant_mm = float(cab_render['dims'].get('t_lr_raw', 19.0))
+                            dW_zone = zone_width_abs + (2.0 * t_montant_mm * unit_factor)
+                            drawer_x_start = zone_x_min_abs - (t_montant_mm * unit_factor)
                             # Profondeur : juste l'épaisseur de la face du tiroir
                             drawer_depth = drp.get('drawer_face_thickness', 19.0) * unit_factor
                             # Position Y : les tiroirs sortent AVANT le panneau avant
