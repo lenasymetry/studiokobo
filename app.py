@@ -2885,10 +2885,10 @@ with col2:
                         
                         if is_applique:
                             # Mode EN APPLIQUE : recouvrir les montants adjacents des deux côtés
-                            # Avec jeu de pose latéral: 4 mm de chaque côté
+                            # Avec jeu de pose latéral: 2 mm de chaque côté
                             # Largeur façade = largeur zone + 2x épaisseur montant - 2x jeu
                             t_montant_mm = float(cab_render['dims'].get('t_lr_raw', 19.0))
-                            side_clearance = 4.0 * unit_factor
+                            side_clearance = 2.0 * unit_factor
                             dW_zone = max(0.0, zone_width_abs + (2.0 * t_montant_mm * unit_factor) - (2.0 * side_clearance))
                             drawer_x_start = zone_x_min_abs - (t_montant_mm * unit_factor) + side_clearance
                             # Profondeur : juste l'épaisseur de la face du tiroir
