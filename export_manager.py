@@ -1161,8 +1161,8 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         fond_L = max(0.0, zone_width_interior - 35.0)
                         fond_H = max(0.0, zone_depth_interior - 10.0)
                     elif drawer_system == 'ANGLAISE':
-                        # ANGLAISE : face commence à 40mm de chaque montant
-                        dr_L = max(0.0, zone_width_total - 80.0)
+                        # ANGLAISE : 2 mm de jeu de chaque côté par rapport aux montants
+                        dr_L = max(0.0, zone_width_total - 4.0)
                         back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
                         fixed_back_h = back_height_map.get(tech_type, 116.0)
                         d_L_t = max(0.0, dr_L - 40.0)
@@ -1849,8 +1849,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     fond_L = max(0.0, zone_width_interior - 35.0)
                     fond_H = max(0.0, zone_depth_interior - 10.0)
                 elif drawer_system == 'ANGLAISE':
-                    # ANGLAISE : face commence à 40mm de chaque montant
-                    dr_L = max(0.0, zone_width_total - 80.0)
+                    # ANGLAISE : 2 mm de jeu de chaque côté par rapport aux montants
+                    dr_L = max(0.0, zone_width_total - 4.0)
                     back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
                     fixed_back_h = back_height_map.get(tech_type, 116.0)
                     d_L_t = max(0.0, dr_L - 40.0)
