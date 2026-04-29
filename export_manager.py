@@ -1005,68 +1005,74 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             holes_md.append({'type':'vis','x':20.0,'y':y,'diam_str':"⌀5/11.5"})
                             holes_md.append({'type':'vis','x':52.0,'y':y,'diam_str':"⌀5/11.5"})
 
-            # --- TIROIRS (MÊME LOGIQUE QUE 2.PY) ---
+            # --- TIROIRS : trous de coulisses sur montants principaux et secondaires ---
             if 'drawers' in cab and cab['drawers']:
                 for drawer_idx, drp in enumerate(cab['drawers']):
                     tech_type = drp.get('drawer_tech_type', 'K')
                     y_slide = t_tb + 33.0 + drp.get('drawer_bottom_offset', 0.0)
                     drawer_zone_id = drp.get('zone_id', None)
-                    
-                    x_slide_holes = []
+
+                    # Calcul des positions X des trous de coulisse selon la profondeur du caisson
+                    x_slide_holes = [19, 37]
                     wr = W_raw
-                    if wr > 643: x_slide_holes = [19, 37, 133, 261, 293, 389, 421, 549]
-                else:
-                    if tech_type == 'N':
-                        if 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
-                        elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
-                        elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                        elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                    if not x_slide_holes:
-                        if 273 < wr < 302: x_slide_holes = [19, 37, 133, 261]
-                        elif 303 < wr < 352: x_slide_holes = [19, 37, 133, 165, 261]
-                        elif 353 < wr < 402: x_slide_holes = [19, 37, 133, 165, 325]
-                        elif 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
-                        elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
-                        elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                        elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                        elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
-                    
-                    # Utiliser les LIMITES DE LA ZONE pour détecter les montants (MÊME LOGIQUE QUE 2.PY)
+                    if wr > 643:
+                        x_slide_holes = [19, 37, 133, 261, 293, 389, 421, 549]
+                    else:
+                        if tech_type == 'N':
+                            if 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
+                            elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
+                            elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                            elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                        if not x_slide_holes or x_slide_holes == [19, 37]:
+                            if wr <= 153: x_slide_holes = [19, 37]
+                            elif 153 < wr < 302: x_slide_holes = [19, 37, 133]
+                            elif 273 < wr < 302: x_slide_holes = [19, 37, 133, 261]
+                            elif 303 < wr < 352: x_slide_holes = [19, 37, 133, 165, 261]
+                            elif 353 < wr < 402: x_slide_holes = [19, 37, 133, 165, 325]
+                            elif 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
+                            elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
+                            elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                            elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                            elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
+
+                    # Utiliser les LIMITES DE LA ZONE pour détecter les montants adjacents
                     zone_x_min = None
                     zone_x_max = None
-                    
+
                     if drawer_zone_id is not None and drawer_zone_id < len(all_zones_2d):
                         zone = all_zones_2d[drawer_zone_id]
                         zone_x_min = zone['x_min']
                         zone_x_max = zone['x_max']
-                    
+
                     if zone_x_min is not None and zone_x_max is not None:
-                        # Montant gauche principal si la zone commence au montant gauche
+                        # Montant gauche principal si la zone borde le montant gauche
                         if abs(zone_x_min - t_lr) < 1.0:
                             for x_s in x_slide_holes:
                                 holes_mg.append({'type': 'vis', 'x': x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
-                        # Montant droit principal si la zone se termine au montant droit
+                        # Montant droit principal si la zone borde le montant droit
                         if abs(zone_x_max - (L_raw - t_lr)) < 1.0:
                             for x_s in x_slide_holes:
                                 holes_md.append({'type': 'vis', 'x': W_mont - x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
-                        
-                        # Montants secondaires qui touchent ce tiroir
+
+                        # Montants secondaires mitoyens à ce tiroir (gauche ET droite de la zone)
                         if 'vertical_dividers' in cab:
                             for div_idx, div in enumerate(cab['vertical_dividers']):
                                 div_x = div['position_x']
                                 div_th = div.get('thickness', 19.0)
                                 div_left_edge = div_x - div_th / 2.0
                                 div_right_edge = div_x + div_th / 2.0
-                                
+
+                                # Face droite du montant secondaire = bord gauche de la zone suivante
                                 touches_left_face = abs(zone_x_max - div_left_edge) < 1.0
+                                # Face gauche du montant secondaire = bord droit de la zone précédente
                                 touches_right_face = abs(zone_x_min - div_right_edge) < 1.0
-                                
+
                                 if touches_left_face:
                                     for x_s in x_slide_holes:
-                                        divider_element_holes_left[div_idx].append({'type':'vis','x':x_s,'y':y_slide,'diam_str':"⌀3"})
+                                        divider_element_holes_left[div_idx].append({'type': 'vis', 'x': x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
                                 if touches_right_face:
                                     for x_s in x_slide_holes:
-                                        divider_element_holes_right[div_idx].append({'type':'vis','x':x_s,'y':y_slide,'diam_str':"⌀3"})
+                                        divider_element_holes_right[div_idx].append({'type': 'vis', 'x': x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
                     else:
                         # Tiroir sur tout le caisson : trous sur les deux montants principaux
                         for x_s in x_slide_holes:
