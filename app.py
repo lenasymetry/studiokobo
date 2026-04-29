@@ -754,6 +754,15 @@ def calculate_all_project_parts():
                     # Hauteur dos selon modèle LÉGRABOX
                     legrabox_spec = legrabox_specs.get(tech_type, legrabox_specs['K'])
                     fixed_back_h = legrabox_spec['back_height']
+                elif drawer_system == 'ANGLAISE':
+                    # ANGLAISE : face commence à 40mm de chaque montant adjacent
+                    drawer_face_width = max(0.0, zone_width_total - 80.0)
+                    drawer_back_width = max(0.0, drawer_face_width - 40.0)
+                    back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
+                    fixed_back_h = back_height_map.get(tech_type, 116.0)
+                    t_fb_raw = float(dims.get('t_fb_raw', 0.0))
+                    drawer_bottom_width = max(0.0, drawer_face_width - 49.0)
+                    drawer_bottom_depth = float(dims['W_raw']) - (20.0 + t_fb_raw)
                 else:
                     # TANDEMBOX : logique existante
                     drawer_face_width = zone_width_total - (2 * gap_mm)
@@ -1507,20 +1516,22 @@ with col1:
                                 dims = selected_cab['dims']
                                 max_height_in_zone = dims['H_raw'] - dims['t_tb_raw'] * 2
                             
-                        # Sélection du système (TANDEMBOX ou LÉGRABOX)
+                        # Sélection du système (TANDEMBOX, LÉGRABOX ou ANGLAISE)
                         drawer_system = p.get('drawer_system', 'TANDEMBOX')
-                        system_idx = 0 if drawer_system == 'TANDEMBOX' else 1
+                        _system_opts = ['TANDEMBOX', 'LÉGRABOX', 'ANGLAISE']
+                        system_idx = _system_opts.index(drawer_system) if drawer_system in _system_opts else 0
                         p['drawer_system'] = st.selectbox(
                             "Système de Tiroir",
-                            options=['TANDEMBOX', 'LÉGRABOX'],
+                            options=_system_opts,
                             index=system_idx,
                             key=f"pending_drawer_system_{idx}",
+                            help="ANGLAISE : tiroir posé 40mm à l'intérieur, face centrée dans la zone"
                         )
                         
                         # Sélection du type selon le système
                         if p['drawer_system'] == 'LÉGRABOX':
                             tech_opts = ['N', 'M', 'K', 'C']
-                        else:
+                        else:  # TANDEMBOX et ANGLAISE partagent les mêmes types
                             tech_opts = ['K', 'M', 'N', 'D']
                         curr_tech = p.get('drawer_tech_type', 'K')
                         idx_tech = tech_opts.index(curr_tech) if curr_tech in tech_opts else 0
@@ -1739,21 +1750,23 @@ with col1:
                                         zone = all_zones_2d_drawers[current_zone]
                                         st.caption(f"Zone sélectionnée : Largeur X = {zone['x_min']:.0f}-{zone['x_max']:.0f}mm, Hauteur Y = {zone['y_min']:.0f}-{zone['y_max']:.0f}mm")
                                 
-                                # Sélection du système (TANDEMBOX ou LÉGRABOX)
+                                # Sélection du système (TANDEMBOX, LÉGRABOX ou ANGLAISE)
                                 drawer_system = d.get('drawer_system', 'TANDEMBOX')
-                                system_idx = 0 if drawer_system == 'TANDEMBOX' else 1
+                                _system_opts_edit = ['TANDEMBOX', 'LÉGRABOX', 'ANGLAISE']
+                                system_idx = _system_opts_edit.index(drawer_system) if drawer_system in _system_opts_edit else 0
                                 st.selectbox(
                                     "Système de Tiroir",
-                                    options=['TANDEMBOX', 'LÉGRABOX'],
+                                    options=_system_opts_edit,
                                     index=system_idx,
                                     key=f"drawer_system_{idx}_{i}",
-                                    on_change=lambda x=i: update_drawer_prop(x, 'drawer_system')
+                                    on_change=lambda x=i: update_drawer_prop(x, 'drawer_system'),
+                                    help="ANGLAISE : tiroir posé 40mm à l'intérieur, face centrée dans la zone"
                                 )
                                 
                                 # Sélection du type selon le système
                                 if drawer_system == 'LÉGRABOX':
                                     tech_opts = ['N', 'M', 'K', 'C']
-                                else:
+                                else:  # TANDEMBOX et ANGLAISE partagent les mêmes types
                                     tech_opts = ['K', 'M', 'N', 'D']
                                 curr_tech = d.get('drawer_tech_type', 'K')
                                 idx_tech = tech_opts.index(curr_tech) if curr_tech in tech_opts else 0
@@ -2856,11 +2869,21 @@ with col2:
                 # IMPORTANT : Calculer les zones SANS inclure les tiroirs (include_all_elements=False)
                 # Les tiroirs ne créent pas de zones, ils sont placés dans des zones existantes
                 all_zones_2d_drawers = zones_render_without_elements
+
+                # Identifier les zone_ids occupées par des tiroirs à l'anglaise
+                # (pour rendre les tiroirs classiques de la même zone semi-transparents)
+                anglaise_zone_ids = set()
+                for _drp_check in cab_render['drawers']:
+                    if _drp_check.get('drawer_system') == 'ANGLAISE':
+                        _zid = _drp_check.get('zone_id')
+                        if _zid is not None:
+                            anglaise_zone_ids.add(_zid)
                 
                 for drawer_idx, drp in enumerate(cab_render['drawers']):
                     gap = drp.get('drawer_gap', 2.0) * unit_factor
                     thk = drp.get('drawer_face_thickness', 19.0) * unit_factor
                     is_preview = bool(drp.get('_preview'))
+                    drawer_system = drp.get('drawer_system', 'TANDEMBOX')
                     
                     # Vérifier si une zone est assignée
                     zone_id = drp.get('zone_id', None)
@@ -2883,7 +2906,16 @@ with col2:
                         # Vérifier le mode (encastré ou en applique)
                         is_applique = bool(drp.get('_applique_mode', False))
                         
-                        if is_applique:
+                        if drawer_system == 'ANGLAISE':
+                            # TIROIR À L'ANGLAISE : face posée 40mm à l'intérieur du caisson
+                            # Largeur face = largeur zone - 80mm (40mm retrait de chaque montant)
+                            anglaise_inset = 40.0 * unit_factor
+                            dW_zone = max(0.0, zone_width_abs - 2.0 * anglaise_inset)
+                            drawer_x_start = zone_x_min_abs + anglaise_inset
+                            # Face à 40mm de profondeur depuis la façade
+                            drawer_depth = drp.get('drawer_face_thickness', 19.0) * unit_factor
+                            drawer_y_pos = o[1] + anglaise_inset
+                        elif is_applique:
                             # Mode EN APPLIQUE : recouvrir les montants adjacents des deux côtés
                             # Avec jeu de pose latéral: 2 mm de chaque côté
                             # Largeur façade = largeur zone + 2x épaisseur montant - 2x jeu
@@ -2907,14 +2939,23 @@ with col2:
                         drawer_z_pos = o[2] + (drp.get('drawer_bottom_offset', 0.0) * unit_factor)
                         
                         if dW_zone > 0 and drawer_depth > 0:
-                            drawer_color = "#666666" if is_preview else ACCESSORY_COLOR
-                            drawer_opacity = 0.35 if is_preview else ACCESSORY_OPACITY
+                            drawer_color = "#666666" if is_preview else (
+                                "#8B4513" if drawer_system == 'ANGLAISE' else ACCESSORY_COLOR
+                            )
+                            # Tiroir classique dans la même zone qu'un tiroir à l'anglaise → semi-transparent
+                            same_zone_as_anglaise = (zone_id in anglaise_zone_ids) and drawer_system != 'ANGLAISE'
+                            if is_preview:
+                                drawer_opacity = 0.35
+                            elif same_zone_as_anglaise:
+                                drawer_opacity = 0.25
+                            else:
+                                drawer_opacity = ACCESSORY_OPACITY
                             fig3d.add_trace(cuboid_mesh_for(
                                 dW_zone, drawer_depth, drawer_height,
                                 (drawer_x_start, drawer_y_pos, drawer_z_pos),
                                 color=drawer_color,
                                 opacity=drawer_opacity,
-                                name=f"Tiroir {i}-{drawer_idx}"
+                                name=f"Tiroir {'Anglaise' if drawer_system == 'ANGLAISE' else ''} {i}-{drawer_idx}"
                             ))
                     else:
                         # Tiroir sur tout le caisson
@@ -2925,7 +2966,14 @@ with col2:
                         drawer_height = drp.get('drawer_face_H_raw', 150.0) * unit_factor
                         drawer_z_pos = o[2] + (drp.get('drawer_bottom_offset', 0.0) * unit_factor)
                         
-                        if is_applique:
+                        if drawer_system == 'ANGLAISE':
+                            # TIROIR À L'ANGLAISE : 40mm inside, width = L - 80mm
+                            anglaise_inset = 40.0 * unit_factor
+                            dW_zone = max(0.0, L - 2.0 * anglaise_inset)
+                            drawer_x_start = o[0] + anglaise_inset
+                            drawer_depth = drp.get('drawer_face_thickness', 19.0) * unit_factor
+                            drawer_y_pos = o[1] + anglaise_inset
+                        elif is_applique:
                             # Mode EN APPLIQUE : recouvrir toute la largeur + épaisseurs montants + 1mm jeu
                             t_montant_mm = float(cab_render['dims'].get('t_lr_raw', 19.0))
                             dW_zone = L + (2.0 * t_montant_mm * unit_factor) + (2.0 * unit_factor)
@@ -2944,14 +2992,16 @@ with col2:
                             # Position : commencer après la traverse avant
                             drawer_y_pos = o[1] + tb
                         
-                        drawer_color = "#666666" if is_preview else ACCESSORY_COLOR
+                        drawer_color = "#666666" if is_preview else (
+                            "#8B4513" if drawer_system == 'ANGLAISE' else ACCESSORY_COLOR
+                        )
                         drawer_opacity = 0.35 if is_preview else ACCESSORY_OPACITY
                         fig3d.add_trace(cuboid_mesh_for(
                             dW_zone, drawer_depth, drawer_height,
                             (drawer_x_start, drawer_y_pos, drawer_z_pos),
                             color=drawer_color,
                             opacity=drawer_opacity,
-                            name=f"Tiroir {i}-{drawer_idx}"
+                            name=f"Tiroir {'Anglaise' if drawer_system == 'ANGLAISE' else ''} {i}-{drawer_idx}"
                         ))
 
             if 'shelves' in cab_render:
