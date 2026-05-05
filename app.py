@@ -1606,11 +1606,15 @@ with col1:
                             format="%.1f",
                             step=0.1,
                         )
+                        _drawer_handle_options = ['none', 'integrated_cutout', 'finger_pull']
+                        _drawer_handle_current = p.get('drawer_handle_type', 'none')
+                        if _drawer_handle_current not in _drawer_handle_options:
+                            _drawer_handle_current = 'none'
                         p['drawer_handle_type'] = st.selectbox(
                             "Poignée",
-                            options=['none', 'integrated_cutout'],
-                            index=['none', 'integrated_cutout'].index(p.get('drawer_handle_type', 'none')),
-                            format_func=lambda x: 'Aucune' if x=='none' else 'Intégrée (Découpe)',
+                            options=_drawer_handle_options,
+                            index=_drawer_handle_options.index(_drawer_handle_current),
+                            format_func=lambda x: 'Aucune' if x=='none' else ('Intégrée (Découpe)' if x=='integrated_cutout' else 'Passe-doigt'),
                             key=f"pending_drawer_handle_type_{idx}",
                         )
                         if p.get('drawer_handle_type') == 'integrated_cutout':
@@ -1634,6 +1638,31 @@ with col1:
                                 key=f"pending_drawer_handle_offset_top_{idx}",
                                 format="%.0f",
                                 step=1.0,
+                            )
+                        elif p.get('drawer_handle_type') == 'finger_pull':
+                            p['drawer_handle_offset_top'] = st.number_input(
+                                "Offset Haut Passe-doigt",
+                                value=float(p.get('drawer_handle_offset_top', 10.0)),
+                                key=f"pending_drawer_finger_pull_offset_top_{idx}",
+                                format="%.0f",
+                                step=1.0,
+                                min_value=0.0,
+                            )
+                            p['drawer_finger_pull_depth'] = st.number_input(
+                                "Profondeur Passe-doigt (mm)",
+                                value=float(p.get('drawer_finger_pull_depth', 12.0)),
+                                key=f"pending_drawer_finger_pull_depth_{idx}",
+                                format="%.1f",
+                                step=0.5,
+                                min_value=1.0,
+                            )
+                            p['drawer_finger_pull_drop'] = st.number_input(
+                                "Hauteur Passe-doigt sur tranche (mm)",
+                                value=float(p.get('drawer_finger_pull_drop', 35.0)),
+                                key=f"pending_drawer_finger_pull_drop_{idx}",
+                                format="%.1f",
+                                step=0.5,
+                                min_value=5.0,
                             )
                         p['material'] = st.text_input(
                             "Matière Face Tiroir",
@@ -1819,11 +1848,15 @@ with col1:
                                     format="%.0f",
                                     step=1.0,
                                 )
+                                _drawer_handle_options_edit = ['none', 'integrated_cutout', 'finger_pull']
+                                _drawer_handle_current_edit = d.get('drawer_handle_type', 'none')
+                                if _drawer_handle_current_edit not in _drawer_handle_options_edit:
+                                    _drawer_handle_current_edit = 'none'
                                 st.selectbox(
                                     "Poignée",
-                                    options=['none', 'integrated_cutout'],
-                                    index=['none', 'integrated_cutout'].index(d.get('drawer_handle_type', 'none')),
-                                    format_func=lambda x: 'Aucune' if x=='none' else 'Intégrée (Découpe)',
+                                    options=_drawer_handle_options_edit,
+                                    index=_drawer_handle_options_edit.index(_drawer_handle_current_edit),
+                                    format_func=lambda x: 'Aucune' if x=='none' else ('Intégrée (Découpe)' if x=='integrated_cutout' else 'Passe-doigt'),
                                     key=f"drawer_handle_type_{idx}_{i}",
                                     on_change=lambda x=i: update_drawer_prop(x, 'drawer_handle_type')
                                 )
@@ -1851,6 +1884,34 @@ with col1:
                                         on_change=lambda x=i: update_drawer_prop(x, 'drawer_handle_offset_top'),
                                         format="%.0f",
                                         step=1.0,
+                                    )
+                                elif d.get('drawer_handle_type') == 'finger_pull':
+                                    st.number_input(
+                                        "Offset Haut Passe-doigt",
+                                        value=float(d.get('drawer_handle_offset_top', 10.0)),
+                                        key=f"drawer_finger_pull_offset_top_{idx}_{i}",
+                                        on_change=lambda x=i: update_drawer_prop(x, 'drawer_handle_offset_top'),
+                                        format="%.0f",
+                                        step=1.0,
+                                        min_value=0.0,
+                                    )
+                                    st.number_input(
+                                        "Profondeur Passe-doigt (mm)",
+                                        value=float(d.get('drawer_finger_pull_depth', 12.0)),
+                                        key=f"drawer_finger_pull_depth_{idx}_{i}",
+                                        on_change=lambda x=i: update_drawer_prop(x, 'drawer_finger_pull_depth'),
+                                        format="%.1f",
+                                        step=0.5,
+                                        min_value=1.0,
+                                    )
+                                    st.number_input(
+                                        "Hauteur Passe-doigt sur tranche (mm)",
+                                        value=float(d.get('drawer_finger_pull_drop', 35.0)),
+                                        key=f"drawer_finger_pull_drop_{idx}_{i}",
+                                        on_change=lambda x=i: update_drawer_prop(x, 'drawer_finger_pull_drop'),
+                                        format="%.1f",
+                                        step=0.5,
+                                        min_value=5.0,
                                     )
                                 st.text_input(
                                     "Matière Face Tiroir",
