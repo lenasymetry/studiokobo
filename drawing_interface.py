@@ -1663,6 +1663,7 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     ((0.0, 0.7936074477439), (0.01668216046, 10.9342268458895)),
                     ((10.02986843417, 0.0), (2.11626485182, 10.9984407028788)),
                     ((30.0, 30.7936074477439), (23.07688512839, 30.7146316416511)),
+                    ((0.01668216046, 10.9342268458895), (0.0, H_REF)),  # trait vertical: fin du profil → haut de la tranche
                 ]
                 template_arcs = [
                     (1.08491583019, 10.3633302143081, 1.211216800208252, 31.62499360406803, 151.87859451026, 12),
@@ -1675,6 +1676,24 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                 # Si la tranche differe de 30 mm, on centre simplement le gabarit.
                 x_shift = (tranche_w - W_REF) / 2.0
                 y_base = W_actual - H_REF
+
+                # Fond blanc sur la zone du profil pour masquer les hachures de chant.
+                x_min_fill = min(x_face, x_outer)
+                x_max_fill = max(x_face, x_outer)
+                fill_rect = [
+                    (x_min_fill, max(y_base, 0.0)),
+                    (x_max_fill, max(y_base, 0.0)),
+                    (x_max_fill, W_actual),
+                    (x_min_fill, W_actual),
+                    (x_min_fill, max(y_base, 0.0)),
+                ]
+                if needs_rotation:
+                    fill_rect = [rotate_coords(px, py) for (px, py) in fill_rect]
+                fig.add_trace(go.Scatter(
+                    x=[p[0] for p in fill_rect], y=[p[1] for p in fill_rect],
+                    fill='toself', fillcolor='white',
+                    line=dict(color='white', width=0),
+                    hoverinfo='skip', showlegend=False))
 
                 def to_global(pt):
                     lx, ly = pt
