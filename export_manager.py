@@ -73,9 +73,9 @@ def _safe_add_text(msp, text, dxfattribs, placement=None, align=None):
     return ent
 
 def _get_secondary_divider_title(div_idx, cab_idx, part_label, output_format):
-    """Nom de feuille montant secondaire: sans suffixe caisson en DXF pour onglets stables."""
+    """Nom de feuille montant secondaire, unique par caisson et partie."""
     if output_format == 'dxf':
-        return f"Montant Secondaire {div_idx+1} - {part_label}"
+        return f"Montant Secondaire {div_idx+1} (C{cab_idx}) - {part_label}"
     return f"Montant Secondaire {div_idx+1} (C{cab_idx}) - {part_label}"
 
 def _is_secondary_divider_title(title):
@@ -1059,11 +1059,18 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             
             # Ajouter les étagères regroupées à la liste des plans
             for shelf_key, shelf_data in shelf_groups.items():
-                shelf_title_with_qty = shelf_data['title']
-                if shelf_data['quantity'] > 1:
-                    shelf_title_with_qty = f"{shelf_data['title']} (x{shelf_data['quantity']})"
-                plans.append((shelf_title_with_qty, shelf_data['L'], shelf_data['W'], shelf_data['T'], shelf_data['ch'], shelf_data['fh'], shelf_data['t_long_h'], shelf_data['t_cote_h'], shelf_data['cut'], False, shelf_data['material']))
-                plan_quantities[shelf_title_with_qty] = shelf_data['quantity']
+                if output_format == 'dxf':
+                    # DXF: 1 élément = 1 feuille, même pour des étagères identiques.
+                    for idx_instance in range(int(shelf_data['quantity'])):
+                        shelf_title_instance = f"{shelf_data['title']} #{idx_instance + 1}"
+                        plans.append((shelf_title_instance, shelf_data['L'], shelf_data['W'], shelf_data['T'], shelf_data['ch'], shelf_data['fh'], shelf_data['t_long_h'], shelf_data['t_cote_h'], shelf_data['cut'], False, shelf_data['material']))
+                        plan_quantities[shelf_title_instance] = 1
+                else:
+                    shelf_title_with_qty = shelf_data['title']
+                    if shelf_data['quantity'] > 1:
+                        shelf_title_with_qty = f"{shelf_data['title']} (x{shelf_data['quantity']})"
+                    plans.append((shelf_title_with_qty, shelf_data['L'], shelf_data['W'], shelf_data['T'], shelf_data['ch'], shelf_data['fh'], shelf_data['t_long_h'], shelf_data['t_cote_h'], shelf_data['cut'], False, shelf_data['material']))
+                    plan_quantities[shelf_title_with_qty] = shelf_data['quantity']
 
             # --- PORTE (MÊME LOGIQUE QUE 2.PY) ---
             if cab['door_props']['has_door']:
@@ -1355,19 +1362,38 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     
                     c_fa = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
                     title_face = f"Façade Tiroir Groupe {group_num} (C{cab_idx}){system_label}{title_suffix}"
-                    plans.append((title_face, dr_L, dr_H, dr_thickness, c_fa, f_holes, [], [], cutout_dict, False, face_material))
-                    plan_quantities[title_face] = quantity
+                    if output_format == 'dxf':
+                        for idx_instance in range(quantity):
+                            title_face_instance = f"Façade Tiroir Groupe {group_num} (C{cab_idx}){system_label} #{idx_instance + 1}"
+                            plans.append((title_face_instance, dr_L, dr_H, dr_thickness, c_fa, f_holes, [], [], cutout_dict, False, face_material))
+                            plan_quantities[title_face_instance] = 1
+                    else:
+                        plans.append((title_face, dr_L, dr_H, dr_thickness, c_fa, f_holes, [], [], cutout_dict, False, face_material))
+                        plan_quantities[title_face] = quantity
                     
                     c_td = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":False}
                     title_dos = f"Tiroir-Dos Groupe {group_num} (C{cab_idx}){system_label}{title_suffix}"
-                    plans.append((title_dos, d_L_t, fixed_back_h, inner_thickness, c_td, d_holes_t, [], [], None, False, inner_material))
-                    plan_quantities[title_dos] = quantity
+                    if output_format == 'dxf':
+                        for idx_instance in range(quantity):
+                            title_dos_instance = f"Tiroir-Dos Groupe {group_num} (C{cab_idx}){system_label} #{idx_instance + 1}"
+                            plans.append((title_dos_instance, d_L_t, fixed_back_h, inner_thickness, c_td, d_holes_t, [], [], None, False, inner_material))
+                            plan_quantities[title_dos_instance] = 1
+                    else:
+                        plans.append((title_dos, d_L_t, fixed_back_h, inner_thickness, c_td, d_holes_t, [], [], None, False, inner_material))
+                        plan_quantities[title_dos] = quantity
                     
                     title_fond = f"Tiroir-Fond Groupe {group_num} (C{cab_idx}){system_label}{title_suffix}"
                     # Passer has_rebate=True pour LÉGRABOX (le paramètre sera ajouté à la fin de la tuple)
-                    plan_tuple = (title_fond, fond_L, fond_H, inner_thickness, c_td, bottom_holes if drawer_system == 'LÉGRABOX' else [], [], [], None, drawer_system == 'LÉGRABOX', inner_material)
-                    plans.append(plan_tuple)
-                    plan_quantities[title_fond] = quantity
+                    if output_format == 'dxf':
+                        for idx_instance in range(quantity):
+                            title_fond_instance = f"Tiroir-Fond Groupe {group_num} (C{cab_idx}){system_label} #{idx_instance + 1}"
+                            plan_tuple = (title_fond_instance, fond_L, fond_H, inner_thickness, c_td, bottom_holes if drawer_system == 'LÉGRABOX' else [], [], [], None, drawer_system == 'LÉGRABOX', inner_material)
+                            plans.append(plan_tuple)
+                            plan_quantities[title_fond_instance] = 1
+                    else:
+                        plan_tuple = (title_fond, fond_L, fond_H, inner_thickness, c_td, bottom_holes if drawer_system == 'LÉGRABOX' else [], [], [], None, drawer_system == 'LÉGRABOX', inner_material)
+                        plans.append(plan_tuple)
+                        plan_quantities[title_fond] = quantity
             
             # --- PORTE ---
             if cab['door_props']['has_door']:
