@@ -1651,23 +1651,24 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_outer_x = x_td_1
 
             def _draw_side_finger_pull_curve(x_face, x_outer):
-                # Gorge en U ouverte par le HAUT de la tranche, contre le bord face (x_face).
-                # Le bord extérieur (x_outer) reste INTACT (non dessiné ici).
+                # Gorge en U ouverte par le HAUT, contre le bord EXTÉRIEUR (x_outer).
+                # Le bord extérieur forme le mur gauche/droit de la gorge.
+                # Le bord face (x_face) reste intact.
                 import math
                 gw = min(groove_depth_req, abs(x_outer - x_face) * 0.75)
                 gw = max(4.0, gw)
+                # d > 0 : tranche droite (x_outer > x_face), d < 0 : tranche gauche
                 d = 1.0 if (x_outer > x_face) else -1.0
-                # Murs gauche/droit de la gorge
-                if d > 0:   # tranche droite : face = gauche
-                    xL = x_face
-                    xR = x_face + gw
-                else:       # tranche gauche : face = droite
-                    xL = x_face - gw
-                    xR = x_face
+                if d < 0:   # tranche gauche : outer = gauche (plus petit x)
+                    xL = x_outer          # mur gauche = bord extérieur
+                    xR = x_outer + gw     # mur droit = intérieur
+                else:       # tranche droite : outer = droite (plus grand x)
+                    xR = x_outer          # mur droit = bord extérieur
+                    xL = x_outer - gw     # mur gauche = intérieur
                 xC = (xL + xR) / 2.0
-                r_bot = gw / 2.0                          # demi-cercle au fond
-                r_top = max(1.5, gw * 0.18)               # arrondis coins du haut
-                y_top = W_actual                          # ouverture en haut
+                r_bot = gw / 2.0
+                r_top = max(1.5, gw * 0.18)
+                y_top = W_actual
                 y_arc_center = max(r_bot + 2.0,
                                    min(y_top - r_top - 1.0,
                                        y_top - groove_drop_req))
@@ -1680,16 +1681,11 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     return pts
 
                 pts = []
-                # 1. Arrondi coin sup-gauche (90°→180°)
                 pts += arc_seg(xL + r_top, y_top - r_top, r_top, 90, 180, n=8)
-                # 2. Mur gauche (descend)
                 pts.append((xL, y_arc_center))
-                # 3. Fond demi-cercle (180°→360° = via le bas)
                 bot = arc_seg(xC, y_arc_center, r_bot, 180, 360, n=16)
                 pts += bot[1:]
-                # 4. Mur droit (remonte)
                 pts.append((xR, y_top - r_top))
-                # 5. Arrondi coin sup-droit (0°→90°)
                 trc = arc_seg(xR - r_top, y_top - r_top, r_top, 0, 90, n=8)
                 pts += trc[1:]
 
