@@ -418,46 +418,27 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             # Sur les 2 tranches latérales: demi-cercle + verticale longeant la face.
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
-            def _arc_pts_dxf(cx, cy, radius, a_start_deg, a_end_deg, n_seg=16):
+            for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
+                # Le bord extérieur (tx_outer) reste INTACT.
+                # On dessine uniquement un arc de cercle concave côté intérieur (tx_face).
                 import math
+                h = groove_drop
+                s = min(groove_depth, abs(tx_outer - tx_face) * 0.85)
+                s = max(1.0, s)
+                R = ((h / 2.0) ** 2 + s ** 2) / (2.0 * s)
+                d_out = 1.0 if (tx_outer > tx_face) else -1.0
+                cx_arc = tx_face - d_out * (R - s)
+                cy_arc = y_line
+                dx = tx_face - cx_arc
+                a_start = math.atan2(h / 2.0, dx)
+                a_end   = math.atan2(-h / 2.0, dx)
+                if d_out < 0 and a_end < a_start:
+                    a_end += 2.0 * math.pi
+                n_seg = 24
                 pts = []
-                a_start = math.radians(a_start_deg)
-                a_end = math.radians(a_end_deg)
                 for i in range(n_seg + 1):
                     t = a_start + (a_end - a_start) * i / float(n_seg)
-                    pts.append((cx + radius * math.cos(t), cy + radius * math.sin(t)))
-                return pts
-
-            for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # Profil identique à passe-doigts.png :
-                # Gorge en U creusée depuis le bord extérieur (tx_outer) vers l'intérieur.
-                import math
-                direction = 1.0 if (tx_face > tx_outer) else -1.0
-                r_corner = max(1.5, groove_depth * 0.15)
-                groove_w = min(groove_depth, abs(tx_face - tx_outer) * 0.6)
-                groove_h = groove_drop
-                r_bottom = min(groove_w / 2.0, groove_h * 0.35)
-
-                x_wall_outer = tx_outer
-                x_wall_inner = tx_outer + direction * groove_w
-
-                y_groove_top = y_line + groove_h / 2.0
-                y_groove_bot_straight = y_line - groove_h / 2.0 + r_bottom
-                y_groove_top_straight = y_groove_top - r_corner
-
-                pts = []
-                pts += _arc_pts_dxf(x_wall_outer + direction * r_corner, y_groove_top - r_corner,
-                                    r_corner, 90, 180 if direction < 0 else 0, n_seg=8)
-                pts.append((x_wall_outer, y_groove_top_straight))
-                pts.append((x_wall_outer, y_groove_bot_straight))
-                cx_bot = (x_wall_outer + x_wall_inner) / 2.0
-                pts += _arc_pts_dxf(cx_bot, y_groove_bot_straight,
-                                    r_bottom, 180, 0, n_seg=16)
-                pts.append((x_wall_inner, y_groove_bot_straight))
-                pts.append((x_wall_inner, y_groove_top_straight))
-                pts += _arc_pts_dxf(x_wall_inner - direction * r_corner, y_groove_top - r_corner,
-                                    r_corner, 0 if direction < 0 else 90, 90 if direction < 0 else 180, n_seg=8)
-
+                    pts.append((cx_arc + R * math.cos(t), cy_arc + R * math.sin(t)))
                 msp.add_lwpolyline(pts, dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
