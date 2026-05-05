@@ -112,6 +112,10 @@ def _sanitize_layout_name(raw_name, fallback="SHEET"):
     base = base.strip("_")
     return (base or fallback)[:31]
 
+def _sheet_layout_name(index):
+    """Nom de layout déterministe, unique et sans limite pratique de nombre de feuilles."""
+    return f"SHEET_{int(index):04d}"
+
 def _fit_view_height_for_bbox(bbox, viewport_w, viewport_h, margin_factor=1.08):
     min_x, min_y, max_x, max_y = bbox
     bw = max(1.0, float(max_x) - float(min_x))
@@ -1562,20 +1566,20 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
 
             if dxf_plan_index > 0:
                 # 1 objet en modelspace = 1 feuille PaperSpace dédiée.
-                used_layout_names = set()
+                layout_creation_errors = []
                 for i, (plan_title, plan_bbox) in enumerate(dxf_plan_layout_specs, start=1):
-                    base_name = _sanitize_layout_name(plan_title, fallback=f"SHEET_{i:02d}")
-                    layout_name = base_name
-                    suffix_idx = 1
-                    while layout_name in used_layout_names:
-                        suffix = f"_{suffix_idx:02d}"
-                        layout_name = (base_name[: max(1, 31 - len(suffix))] + suffix)[:31]
-                        suffix_idx += 1
-                    used_layout_names.add(layout_name)
+                    # Nommage séquentiel robuste: évite toute collision/troncature liée aux titres.
+                    layout_name = _sheet_layout_name(i)
                     try:
                         _create_layout_for_plan(dxf_doc, layout_name, plan_bbox)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        layout_creation_errors.append(f"{layout_name} ({plan_title}): {e}")
+
+                if layout_creation_errors:
+                    error_msg = "[DXF EXPORT ERROR] Impossible de créer toutes les feuilles d'usinage:\n"
+                    for err in layout_creation_errors:
+                        error_msg += f" - {err}\n"
+                    return error_msg.encode('utf-8'), False
 
                 legend_x = dxf_plan_index * 2600.0 + 500.0
                 legend_y = 0.0
