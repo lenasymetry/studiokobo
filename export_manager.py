@@ -411,14 +411,34 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             # Sur les 2 tranches latérales: même profil de passe-doigt.
             groove_depth = max(1.0, float(center_cutout_props.get('depth', 12.0)))
             groove_drop = max(5.0, float(center_cutout_props.get('drop', 35.0)))
-            groove_drop = min(groove_drop, max(5.0, y_line - y0 - 2.0))
+            groove_drop = min(groove_drop, max(6.0, y_line - y0 - 2.0))
+            arc_radius = max(1.0, min(groove_depth, groove_drop))
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
             for tx_inner, sign in ((tg_x0, -1.0), (td_x0, 1.0)):
                 x_step = tx_inner + sign * groove_depth
-                y_bottom = y_line - groove_drop
-                msp.add_line((tx_inner, y_line), (x_step, y_line), dxfattribs=profile_layer)
-                msp.add_line((x_step, y_line), (x_step, y_bottom), dxfattribs=profile_layer)
+                y_arc_end = y_line - arc_radius
+
+                # Entrée arrondie (approximation en polyligne) puis segment vertical vers le haut.
+                import math
+                cx = x_step
+                cy = y_line
+                if x_step < tx_inner:
+                    theta_start, theta_end = 0.0, -math.pi / 2.0
+                else:
+                    theta_start, theta_end = math.pi, 3.0 * math.pi / 2.0
+                n_seg = 12
+                curve_pts = []
+                for i in range(n_seg + 1):
+                    t = i / float(n_seg)
+                    th = theta_start + (theta_end - theta_start) * t
+                    px = cx + arc_radius * math.cos(th)
+                    py = cy + arc_radius * math.sin(th)
+                    curve_pts.append((px, py))
+                msp.add_lwpolyline(curve_pts, dxfattribs=profile_layer)
+
+                # Remontée verticale jusqu'au haut de la face pour conserver l'épaisseur demandée.
+                msp.add_line((x_step, y_arc_end), (x_step, y1), dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
             cW = float(center_cutout_props.get('width', 150.0))
