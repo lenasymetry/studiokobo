@@ -2122,14 +2122,14 @@ with col1:
                                     if p['zone_id'] < len(all_zones_2d):
                                         stored_zone = all_zones_2d[p['zone_id']]
                                 if is_double:
-                                    # Créer 2 montants côte à côte sans jeu
-                                    # center_x est le centre de l'ensemble du double montant
+                                    # Créer 2 montants avec un écart de 1 mm, centrés sur center_x.
                                     center_x = float(p.get('position_x', (min_x + max_x) / 2.0))
                                     th = float(p.get('thickness', 19.0))
-                                    # Les positions stockées sont les centres de chaque montant.
-                                    # Pour centrer le double montant, les centres sont espacés de l'épaisseur.
-                                    pos_left = center_x - th / 2.0
-                                    pos_right = center_x + th / 2.0
+                                    gap_mm = 1.0
+                                    # Distance entre centres = épaisseur + écart.
+                                    center_offset = (th + gap_mm) / 2.0
+                                    pos_left = center_x - center_offset
+                                    pos_right = center_x + center_offset
                                     for px in (pos_left, pos_right):
                                         d_copy = copy.deepcopy(p)
                                         d_copy['position_x'] = px
@@ -2594,12 +2594,14 @@ with col2:
                 if kind == 'vertical_divider':
                     cab_render.setdefault('vertical_dividers', []).append({**copy.deepcopy(p), '_preview': True})
                 elif kind == 'vertical_divider_double':
-                    # Double montant : 2 montants côte à côte, centrés sur position_x, sans jeu
+                    # Double montant : 2 montants avec 1 mm d'écart, centrés sur position_x.
                     th = float(p.get('thickness', 19.0))
+                    gap_mm = 1.0
                     L_raw = cab.get('dims', {}).get('L_raw', 0.0)
                     center_x = float(p.get('position_x', (L_raw / 2.0 if L_raw else 0.0)))
-                    pos_left = center_x - th / 2.0
-                    pos_right = center_x + th / 2.0
+                    center_offset = (th + gap_mm) / 2.0
+                    pos_left = center_x - center_offset
+                    pos_right = center_x + center_offset
                     div_left = {**copy.deepcopy(p), 'position_x': pos_left, '_preview': True}
                     div_right = {**copy.deepcopy(p), 'position_x': pos_right, '_preview': True}
                     cab_render.setdefault('vertical_dividers', []).extend([div_left, div_right])
