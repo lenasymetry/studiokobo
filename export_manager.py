@@ -418,39 +418,47 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             # Sur les 2 tranches latérales: demi-cercle + verticale longeant la face.
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
-            def _half_round_points_dxf(x_start, x_end, y_base, rise, n_seg=18, upward=True):
+            def _arc_pts_dxf(cx, cy, radius, a_start_deg, a_end_deg, n_seg=16):
                 import math
                 pts = []
+                a_start = math.radians(a_start_deg)
+                a_end = math.radians(a_end_deg)
                 for i in range(n_seg + 1):
-                    u = i / float(n_seg)
-                    x = x_start + (x_end - x_start) * u
-                    val = max(0.0, 1.0 - (2.0 * u - 1.0) ** 2)
-                    y_off = float(rise) * math.sqrt(val)
-                    y = y_base + y_off if upward else y_base - y_off
-                    pts.append((x, y))
+                    t = a_start + (a_end - a_start) * i / float(n_seg)
+                    pts.append((cx + radius * math.cos(t), cy + radius * math.sin(t)))
                 return pts
 
             for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # La forme couvre toute la tranche: bord extérieur -> bord côté face.
-                x_stem = tx_outer
-                x_join = tx_outer + (tx_face - tx_outer) * 0.58
-                full_width = abs(tx_face - tx_outer)
+                # Profil identique à passe-doigts.png :
+                # Gorge en U creusée depuis le bord extérieur (tx_outer) vers l'intérieur.
+                import math
+                direction = 1.0 if (tx_face > tx_outer) else -1.0
+                r_corner = max(1.5, groove_depth * 0.15)
+                groove_w = min(groove_depth, abs(tx_face - tx_outer) * 0.6)
+                groove_h = groove_drop
+                r_bottom = min(groove_w / 2.0, groove_h * 0.35)
 
-                y_cap_base = y_line - groove_drop * 0.06
-                y_join = y_line - groove_drop * 0.30
-                y_join = max(y0 + 2.0, min(y_cap_base - 1.0, y_join))
+                x_wall_outer = tx_outer
+                x_wall_inner = tx_outer + direction * groove_w
 
-                cap_rise = max(1.0, min(full_width * 0.32, abs(x_join - x_stem) * 0.9))
-                bowl_rise = max(1.0, groove_drop - (y_line - y_join))
+                y_groove_top = y_line + groove_h / 2.0
+                y_groove_bot_straight = y_line - groove_h / 2.0 + r_bottom
+                y_groove_top_straight = y_groove_top - r_corner
 
-                cap_pts = _half_round_points_dxf(x_stem, x_join, y_cap_base, cap_rise, n_seg=16, upward=True)
-                bowl_pts = _half_round_points_dxf(x_join, tx_face, y_join, bowl_rise, n_seg=22, upward=False)
-                msp.add_lwpolyline(cap_pts, dxfattribs=profile_layer)
-                msp.add_lwpolyline(bowl_pts, dxfattribs=profile_layer)
+                pts = []
+                pts += _arc_pts_dxf(x_wall_outer + direction * r_corner, y_groove_top - r_corner,
+                                    r_corner, 90, 180 if direction < 0 else 0, n_seg=8)
+                pts.append((x_wall_outer, y_groove_top_straight))
+                pts.append((x_wall_outer, y_groove_bot_straight))
+                cx_bot = (x_wall_outer + x_wall_inner) / 2.0
+                pts += _arc_pts_dxf(cx_bot, y_groove_bot_straight,
+                                    r_bottom, 180, 0, n_seg=16)
+                pts.append((x_wall_inner, y_groove_bot_straight))
+                pts.append((x_wall_inner, y_groove_top_straight))
+                pts += _arc_pts_dxf(x_wall_inner - direction * r_corner, y_groove_top - r_corner,
+                                    r_corner, 0 if direction < 0 else 90, 90 if direction < 0 else 180, n_seg=8)
 
-                msp.add_line((x_stem, y_cap_base), (x_stem, y_join), dxfattribs=profile_layer)
-                msp.add_line((x_join, y_cap_base), (x_join, y_join), dxfattribs=profile_layer)
-                msp.add_line((tx_face, y_join), (tx_face, y1), dxfattribs=profile_layer)
+                msp.add_lwpolyline(pts, dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
             cW = float(center_cutout_props.get('width', 150.0))
