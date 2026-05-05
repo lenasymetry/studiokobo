@@ -105,6 +105,61 @@ def _sanitize_dxf_doc(doc):
         except Exception:
             pass
 
+def _sanitize_layout_name(raw_name, fallback="SHEET"):
+    import re
+    base = re.sub(r"[^A-Za-z0-9_\- ]+", "", str(raw_name or "")).strip()
+    base = re.sub(r"\s+", "_", base)
+    base = base.strip("_")
+    return (base or fallback)[:31]
+
+def _fit_view_height_for_bbox(bbox, viewport_w, viewport_h, margin_factor=1.08):
+    min_x, min_y, max_x, max_y = bbox
+    bw = max(1.0, float(max_x) - float(min_x))
+    bh = max(1.0, float(max_y) - float(min_y))
+    vp_ratio = max(1e-6, float(viewport_w) / float(viewport_h))
+    bbox_ratio = bw / bh
+
+    if bbox_ratio > vp_ratio:
+        # Contenu plus large que le viewport: hauteur pilotée par la largeur.
+        return max(10.0, (bw / vp_ratio) * float(margin_factor))
+    return max(10.0, bh * float(margin_factor))
+
+def _create_layout_for_plan(doc, layout_name, bbox, paper_w=420.0, paper_h=297.0, margin=10.0):
+    if layout_name in doc.layouts:
+        layout = doc.layouts.get(layout_name)
+    else:
+        layout = doc.layouts.new(layout_name)
+
+    try:
+        layout.page_setup(size=(float(paper_w), float(paper_h)), margins=(float(margin),) * 4, units="mm")
+    except Exception:
+        pass
+
+    # Recrée un viewport unique par feuille.
+    for vp in list(layout.query("VIEWPORT")):
+        try:
+            layout.delete_entity(vp)
+        except Exception:
+            pass
+
+    vp_center = (float(paper_w) / 2.0, float(paper_h) / 2.0)
+    vp_size = (
+        max(1.0, float(paper_w) - 2.0 * float(margin)),
+        max(1.0, float(paper_h) - 2.0 * float(margin)),
+    )
+
+    min_x, min_y, max_x, max_y = bbox
+    model_center = ((float(min_x) + float(max_x)) / 2.0, (float(min_y) + float(max_y)) / 2.0)
+    view_height = _fit_view_height_for_bbox(bbox, vp_size[0], vp_size[1])
+
+    layout.add_viewport(
+        center=vp_center,
+        size=vp_size,
+        view_center_point=model_center,
+        view_height=view_height,
+        status=2,
+    )
+
 def _add_linear_dimension_dxf(msp, base, p1, p2, angle, layer="COTES", text_override=None, dimstyle="COTATIONS_PRO"):
     """Ajoute une vraie dimension AutoCAD éditable avec l'outil COTE."""
     try:
@@ -595,6 +650,13 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
         for err in validation_errors:
             print(f"[DXF VALIDATION] {title}: {err}", file=sys.stderr)
 
+    # Bounding box large pour cadrer correctement la feuille dans son layout dédié.
+    sheet_min_x = min(tg_x1, x0 - 300.0, cartouche_x_start - 50.0)
+    sheet_max_x = max(td_x1, x1 + 300.0, cartouche_x_start + cartouche_width + 50.0)
+    sheet_min_y = min(tb_y1 - 350.0, cartouche_y_top - cartouche_height - 50.0, y0 - 350.0)
+    sheet_max_y = max(y1 + 320.0, th_y1 + 200.0)
+    return (sheet_min_x, sheet_min_y, sheet_max_x, sheet_max_y)
+
 
 def get_automatic_edge_banding_export(part_name):
     name = part_name.lower()
@@ -623,6 +685,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
     dxf_doc = None
     dxf_msp = None
     dxf_plan_index = 0
+    dxf_plan_layout_specs = []
     rendered_plan_titles = []
     figures_out = []
     selected_materials_set = {
@@ -683,7 +746,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
     def _add_plan(title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut, has_rebate, proj_for_plan):
         nonlocal dxf_plan_index
         if output_format == 'dxf':
-            _add_plan_to_dxf(
+            bbox = _add_plan_to_dxf(
                 dxf_msp,
                 title,
                 Lp,
@@ -698,6 +761,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 ch=ch,
                 has_rebate=has_rebate,
             )
+            dxf_plan_layout_specs.append((str(title), bbox))
             dxf_plan_index += 1
             return
         return draw_machining_view_pro_final(
@@ -1497,6 +1561,22 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 return error_msg.encode('utf-8'), False
 
             if dxf_plan_index > 0:
+                # 1 objet en modelspace = 1 feuille PaperSpace dédiée.
+                used_layout_names = set()
+                for i, (plan_title, plan_bbox) in enumerate(dxf_plan_layout_specs, start=1):
+                    base_name = _sanitize_layout_name(plan_title, fallback=f"SHEET_{i:02d}")
+                    layout_name = base_name
+                    suffix_idx = 1
+                    while layout_name in used_layout_names:
+                        suffix = f"_{suffix_idx:02d}"
+                        layout_name = (base_name[: max(1, 31 - len(suffix))] + suffix)[:31]
+                        suffix_idx += 1
+                    used_layout_names.add(layout_name)
+                    try:
+                        _create_layout_for_plan(dxf_doc, layout_name, plan_bbox)
+                    except Exception:
+                        pass
+
                 legend_x = dxf_plan_index * 2600.0 + 500.0
                 legend_y = 0.0
 
