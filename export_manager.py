@@ -49,6 +49,18 @@ def _format_dim_value(value):
 def _convert_diameter_string_autocad(diam_str):
     return str(diam_str).replace('⌀', '%%c').replace('Ø', '%%c')
 
+def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=40.0):
+    """Décale les perçages de coulisses des tiroirs ANGLAISE de 40 mm vers l'intérieur."""
+    base_positions = [float(x) for x in (x_slide_holes or [])]
+    if str(drawer_system) != 'ANGLAISE':
+        return base_positions
+
+    max_pos = max(0.0, float(panel_depth_mm) - 1.0)
+    shifted = [x + float(inset_mm) for x in base_positions]
+    filtered = [x for x in shifted if 0.0 <= x <= max_pos]
+    # Fallback: ne jamais renvoyer une liste vide pour éviter de perdre la feuille d'usinage.
+    return filtered if filtered else ([max_pos] if max_pos > 0.0 else [])
+
 def _safe_add_text(msp, text, dxfattribs, placement=None, align=None):
     if text is None:
         return None
@@ -1008,6 +1020,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             # --- TIROIRS : trous de coulisses sur montants principaux et secondaires ---
             if 'drawers' in cab and cab['drawers']:
                 for drawer_idx, drp in enumerate(cab['drawers']):
+                    drawer_system = drp.get('drawer_system', 'TANDEMBOX')
                     tech_type = drp.get('drawer_tech_type', 'K')
                     y_slide = t_tb + 33.0 + drp.get('drawer_bottom_offset', 0.0)
                     drawer_zone_id = drp.get('zone_id', None)
@@ -1034,6 +1047,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
                             elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                             elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
+
+                            # Tiroir à l'anglaise: perçages décalés de 40 mm pour coller à la visu 3D.
+                            x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
 
                     # Utiliser les LIMITES DE LA ZONE pour détecter les montants adjacents
                     zone_x_min = None
@@ -1355,6 +1371,28 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     divider_material = div.get('material', cab.get('material_body', 'Matière Corps'))
                     plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2", div_w, div_h, div_th, c_div_12, divider_element_holes_left[div_idx], div_tranche_holes, [], None, False, divider_material))
                     plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2", div_w, div_h, div_th, c_div_22, divider_element_holes_right[div_idx], div_tranche_holes, [], None, False, divider_material))
+
+            # Garde-fou: forcer les 2 feuilles par montant secondaire même si un traitement amont a sauté.
+            if 'vertical_dividers' in cab and cab['vertical_dividers']:
+                existing_plan_titles = {str(p[0]) for p in plans if isinstance(p, tuple) and len(p) >= 1}
+                for div_idx, div in enumerate(cab['vertical_dividers']):
+                    div_th = div.get('thickness', 19.0)
+                    div_h = h_side
+                    div_w = W_mont
+                    div_tranche_holes = get_vertical_divider_tranche_holes(W_mont, div_th)
+                    c_div_12 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":True}
+                    c_div_22 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":True, "Chant Droit":False}
+                    divider_material = div.get('material', cab.get('material_body', 'Matière Corps'))
+
+                    title_12 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2"
+                    if title_12 not in existing_plan_titles:
+                        plans.append((title_12, div_w, div_h, div_th, c_div_12, divider_element_holes_left.get(div_idx, []), div_tranche_holes, [], None, False, divider_material))
+                        existing_plan_titles.add(title_12)
+
+                    title_22 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2"
+                    if title_22 not in existing_plan_titles:
+                        plans.append((title_22, div_w, div_h, div_th, c_div_22, divider_element_holes_right.get(div_idx, []), div_tranche_holes, [], None, False, divider_material))
+                        existing_plan_titles.add(title_22)
 
             for item in plans:
                 material_name = ""
@@ -1724,6 +1762,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
         # Trous pour tiroirs
         if 'drawers' in cab and cab['drawers']:
             for drawer_idx, drp in enumerate(cab['drawers']):
+                drawer_system = drp.get('drawer_system', 'TANDEMBOX')
                 y_slide = t_tb + 33.0 + drp.get('drawer_bottom_offset', 0.0)
                 drawer_zone_id = drp.get('zone_id', None)
                 x_slide_holes = [19, 37]
@@ -1737,6 +1776,9 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
                 elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                 elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
+
+                # Tiroir à l'anglaise: perçages décalés de 40 mm pour coller à la visu 3D.
+                x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
                 
                 zone_x_min = None
                 zone_x_max = None
@@ -2050,6 +2092,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
         
         # Montants secondaires (diviseurs verticaux)
         if 'vertical_dividers' in cab and cab['vertical_dividers']:
+            added_divider_sheet_titles = set()
             for div_idx, div in enumerate(cab['vertical_dividers']):
                 div_h = div.get('height', h_side)
                 div_w = W_mont
@@ -2069,6 +2112,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     divider_element_holes_left[div_idx],
                     div_tranche_holes,
                 )
+                added_divider_sheet_titles.add(f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2")
                 
                 fig_div2 = draw_machining_view_pro_final(
                     f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2",
@@ -2081,6 +2125,36 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     divider_element_holes_right[div_idx],
                     div_tranche_holes,
                 )
+                added_divider_sheet_titles.add(f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2")
+
+            # Garde-fou: ajouter les feuilles manquantes de montants secondaires si nécessaire.
+            for div_idx, div in enumerate(cab['vertical_dividers']):
+                div_h = div.get('height', h_side)
+                div_w = W_mont
+                div_th = div.get('thickness', 19.0)
+                div_tranche_holes = get_vertical_divider_tranche_holes(W_mont, div_th)
+                c_div_12 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":True}
+                c_div_22 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":True, "Chant Droit":False}
+
+                title_12 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2"
+                if title_12 not in added_divider_sheet_titles:
+                    fig_div1 = draw_machining_view_pro_final(
+                        title_12,
+                        div_w, div_h, div_th, st.session_state.unit_select, proj, c_div_12,
+                        divider_element_holes_left.get(div_idx, []), div_tranche_holes, [], None, False
+                    )
+                    _append_figure(title_12, fig_div1, divider_element_holes_left.get(div_idx, []), div_tranche_holes)
+                    added_divider_sheet_titles.add(title_12)
+
+                title_22 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2"
+                if title_22 not in added_divider_sheet_titles:
+                    fig_div2 = draw_machining_view_pro_final(
+                        title_22,
+                        div_w, div_h, div_th, st.session_state.unit_select, proj, c_div_22,
+                        divider_element_holes_right.get(div_idx, []), div_tranche_holes, [], None, False
+                    )
+                    _append_figure(title_22, fig_div2, divider_element_holes_right.get(div_idx, []), div_tranche_holes)
+                    added_divider_sheet_titles.add(title_22)
         
         # Étagères
         if shelves_list:
