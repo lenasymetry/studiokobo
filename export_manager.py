@@ -436,16 +436,17 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
 
                 d = 1.0 if (tx_outer > tx_face) else -1.0
                 tranche_w = abs(tx_outer - tx_face)
-                sx = tranche_w / W_REF
-                y_ref_top = y1 - offset_top
-                y_base = y_ref_top - H_REF
+                # Forme verrouillee a l'identique (pas de mise a l'echelle).
+                # Si la tranche differe de 30 mm, on centre simplement le gabarit.
+                x_shift = (tranche_w - W_REF) / 2.0
+                y_base = y1 - H_REF
 
                 def to_global(pt):
                     lx, ly = pt
                     if d > 0:
-                        gx = tx_face + lx * sx
+                        gx = tx_face + x_shift + lx
                     else:
-                        gx = tx_face - lx * sx
+                        gx = tx_face - x_shift - lx
                     gy = y_base + ly
                     return gx, gy
 
