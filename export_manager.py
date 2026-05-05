@@ -419,42 +419,46 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
             for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # Gorge en U ouverte par le HAUT (y1), contre le bord EXTÉRIEUR (tx_outer).
-                # Le bord face (tx_face) reste intact.
+                # Forme EXACTE pousse doigt.png : 2 traits + grand demi-cercle fond + petit demi-cercle haut
                 import math
-                gw = min(groove_depth, abs(tx_outer - tx_face) * 0.75)
-                gw = max(4.0, gw)
+                gw = min(groove_depth, abs(tx_outer - tx_face) * 0.80)
+                gw = max(6.0, gw)
+                r_big   = gw / 2.0
+                r_small = max(3.0, gw * 0.38)
                 d = 1.0 if (tx_outer > tx_face) else -1.0
-                if d < 0:   # tranche gauche : outer = gauche
-                    xL = tx_outer
-                    xR = tx_outer + gw
-                else:       # tranche droite : outer = droite
-                    xR = tx_outer
-                    xL = tx_outer - gw
-                xC = (xL + xR) / 2.0
-                r_bot = gw / 2.0
-                r_top = max(1.5, gw * 0.18)
-                y_top = y1
-                y_arc_center = max(y0 + r_bot + 2.0,
-                                   min(y_top - r_top - 1.0,
-                                       y_top - groove_drop))
+                if d < 0:   # tranche gauche
+                    x_open = tx_face - gw
+                    x_cap  = tx_face
+                    cap_cx = x_cap - r_small
+                    big_cx = tx_face - r_big
+                    big_a0, big_a1 = 180, 360
+                    cap_a0, cap_a1 =   0, 180
+                else:       # tranche droite
+                    x_open = tx_face + gw
+                    x_cap  = tx_face
+                    cap_cx = x_cap + r_small
+                    big_cx = tx_face + r_big
+                    big_a0, big_a1 =   0, -180
+                    cap_a0, cap_a1 = 180,    0
 
-                def arc_seg_dxf(cx, cy, r, a0, a1, n=12):
+                y_big_cy = max(y0 + r_big + 2.0, y1 - groove_drop + r_big)
+                y_cap_cy = max(y_big_cy + r_big + r_small + 4.0,
+                               y1 - groove_drop * 0.28)
+
+                def arc_seg_dxf(cx, cy, r, a0_deg, a1_deg, n=16):
                     pts = []
                     for i in range(n + 1):
-                        t = math.radians(a0 + (a1 - a0) * i / float(n))
+                        t = math.radians(a0_deg + (a1_deg - a0_deg) * i / float(n))
                         pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
                     return pts
 
-                pts = []
-                pts += arc_seg_dxf(xL + r_top, y_top - r_top, r_top, 90, 180, n=8)
-                pts.append((xL, y_arc_center))
-                bot = arc_seg_dxf(xC, y_arc_center, r_bot, 180, 360, n=16)
-                pts += bot[1:]
-                pts.append((xR, y_top - r_top))
-                trc = arc_seg_dxf(xR - r_top, y_top - r_top, r_top, 0, 90, n=8)
-                pts += trc[1:]
-                msp.add_lwpolyline(pts, dxfattribs=profile_layer)
+                pts_dxf = []
+                pts_dxf.append((x_open, y1))
+                pts_dxf.append((x_open, y_big_cy))
+                pts_dxf += arc_seg_dxf(big_cx, y_big_cy, r_big, big_a0, big_a1, n=18)[1:]
+                pts_dxf.append((x_cap, y_cap_cy))
+                pts_dxf += arc_seg_dxf(cap_cx, y_cap_cy, r_small, cap_a0, cap_a1, n=12)[1:]
+                msp.add_lwpolyline(pts_dxf, dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
             cW = float(center_cutout_props.get('width', 150.0))
