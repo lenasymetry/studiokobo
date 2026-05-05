@@ -1644,65 +1644,63 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                 fig.add_shape(type="line", x0=0.0, y0=y_line, x1=L_actual, y1=y_line, line=dict(color="black", width=1), layer="above")
 
             # Ajouter aussi la forme de découpe sur les 2 tranches latérales:
-            # demi-cercle + segment vertical qui remonte jusqu'en haut de la face.
+            # profil identique à la PJ (petit dôme haut + creux arrondi + remontée sur la face).
             left_inner_x = x_tg_0
             right_inner_x = x_td_0
 
-            def _draw_side_finger_pull_curve(x_inner, bulge_to_left):
+            def _half_round_points(x_start, x_end, y_base, rise, n_seg=18, upward=True):
                 import math
-
-                # Demi-cercle dont les deux extrémités sont sur la face (x_inner).
-                cx = x_inner
-                cy = y_line - arc_radius
-                if bulge_to_left:
-                    theta_start, theta_end = math.pi / 2.0, 3.0 * math.pi / 2.0
-                else:
-                    theta_start, theta_end = -math.pi / 2.0, math.pi / 2.0
-
-                n_seg = 14
-                curve_pts = []
+                pts = []
                 for i in range(n_seg + 1):
-                    t = i / float(n_seg)
-                    th = theta_start + (theta_end - theta_start) * t
-                    px = cx + arc_radius * math.cos(th)
-                    py = cy + arc_radius * math.sin(th)
-                    curve_pts.append((px, py))
+                    u = i / float(n_seg)
+                    x = x_start + (x_end - x_start) * u
+                    val = max(0.0, 1.0 - (2.0 * u - 1.0) ** 2)
+                    y_off = float(rise) * math.sqrt(val)
+                    y = y_base + y_off if upward else y_base - y_off
+                    pts.append((x, y))
+                return pts
 
-                # Segment vertical qui longe la face jusqu'en haut.
-                x_vert = x_inner
-                y_vert_start = y_line - 2.0 * arc_radius
-                y_vert_end = W_actual
+            def _draw_side_finger_pull_curve(x_face, inward_sign):
+                depth_local = groove_depth
+                x_stem = x_face + inward_sign * depth_local
+                x_join = x_face + inward_sign * (depth_local * 0.58)
+
+                # Niveaux verticaux de la forme de la PJ.
+                y_cap_base = y_line - groove_drop_req * 0.06
+                y_join = y_line - groove_drop_req * 0.30
+                y_join = max(2.0, min(y_cap_base - 1.0, y_join))
+
+                # Petit dôme (haut) et grand creux (bas).
+                cap_rise = max(1.0, abs(x_join - x_stem) / 2.0)
+                bowl_rise = max(1.0, groove_drop_req - (y_line - y_join))
+
+                cap_pts = _half_round_points(x_stem, x_join, y_cap_base, cap_rise, n_seg=16, upward=True)
+                bowl_pts = _half_round_points(x_join, x_face, y_join, bowl_rise, n_seg=22, upward=False)
+
+                # Segments verticaux: petit jambage + remontée sur la face.
+                segs = [
+                    ((x_stem, y_cap_base), (x_stem, y_join)),
+                    ((x_join, y_cap_base), (x_join, y_join)),
+                    ((x_face, y_join), (x_face, W_actual)),
+                ]
 
                 if needs_rotation:
-                    curve_rot = [rotate_coords(px, py) for (px, py) in curve_pts]
-                    fig.add_trace(
-                        go.Scatter(
-                            x=[p[0] for p in curve_rot],
-                            y=[p[1] for p in curve_rot],
-                            mode='lines',
-                            line=dict(color='black', width=1),
-                            hoverinfo='skip',
-                            showlegend=False,
-                        )
-                    )
-                    x0r, y0r = rotate_coords(x_vert, y_vert_start)
-                    x1r, y1r = rotate_coords(x_vert, y_vert_end)
-                    fig.add_shape(type="line", x0=x0r, y0=y0r, x1=x1r, y1=y1r, line=dict(color="black", width=1), layer="above")
+                    cap_rot = [rotate_coords(px, py) for (px, py) in cap_pts]
+                    bowl_rot = [rotate_coords(px, py) for (px, py) in bowl_pts]
+                    fig.add_trace(go.Scatter(x=[p[0] for p in cap_rot], y=[p[1] for p in cap_rot], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
+                    fig.add_trace(go.Scatter(x=[p[0] for p in bowl_rot], y=[p[1] for p in bowl_rot], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
+                    for (sx0, sy0), (sx1, sy1) in segs:
+                        x0r, y0r = rotate_coords(sx0, sy0)
+                        x1r, y1r = rotate_coords(sx1, sy1)
+                        fig.add_shape(type="line", x0=x0r, y0=y0r, x1=x1r, y1=y1r, line=dict(color="black", width=1), layer="above")
                 else:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=[p[0] for p in curve_pts],
-                            y=[p[1] for p in curve_pts],
-                            mode='lines',
-                            line=dict(color='black', width=1),
-                            hoverinfo='skip',
-                            showlegend=False,
-                        )
-                    )
-                    fig.add_shape(type="line", x0=x_vert, y0=y_vert_start, x1=x_vert, y1=y_vert_end, line=dict(color="black", width=1), layer="above")
+                    fig.add_trace(go.Scatter(x=[p[0] for p in cap_pts], y=[p[1] for p in cap_pts], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
+                    fig.add_trace(go.Scatter(x=[p[0] for p in bowl_pts], y=[p[1] for p in bowl_pts], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
+                    for (sx0, sy0), (sx1, sy1) in segs:
+                        fig.add_shape(type="line", x0=sx0, y0=sy0, x1=sx1, y1=sy1, line=dict(color="black", width=1), layer="above")
 
-            _draw_side_finger_pull_curve(left_inner_x, bulge_to_left=True)
-            _draw_side_finger_pull_curve(right_inner_x, bulge_to_left=False)
+            _draw_side_finger_pull_curve(left_inner_x, inward_sign=-1.0)
+            _draw_side_finger_pull_curve(right_inner_x, inward_sign=1.0)
         else:
             cW, cH = center_cutout_props['width'], center_cutout_props['height']
             cOff = center_cutout_props['offset_top']
