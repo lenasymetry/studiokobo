@@ -1623,23 +1623,35 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
         draw_triangle(L_actual/2, 0, filled=False, orientation='down')
 
     if center_cutout_props:
-        cW, cH = center_cutout_props['width'], center_cutout_props['height']
-        cOff = center_cutout_props['offset_top']
-        x0, x1 = (L_actual-cW)/2, (L_actual-cW)/2 + cW
-        y1, y0 = W_actual-cOff, W_actual-cOff-cH
-        if needs_rotation:
-            # Transformer les coins du rectangle
-            x0_rot, y0_rot = rotate_coords(x0, y0)
-            x1_rot, y1_rot = rotate_coords(x1, y1)
-            x0_rot2, y1_rot2 = rotate_coords(x0, y1)
-            x1_rot2, y0_rot2 = rotate_coords(x1, y0)
-            fig.add_shape(type="path", 
-                         path=f"M {x0_rot},{y0_rot} L {x1_rot},{y0_rot2} L {x1_rot2},{y1_rot} L {x0_rot2},{y1_rot2} Z",
-                         line=dict(color="black", width=1, dash="dash"), layer="above")
+        cutout_type = str(center_cutout_props.get('type', 'integrated_cutout'))
+        if cutout_type == 'finger_pull':
+            # Exigence métier: passe-doigt affiché en face par un seul trait horizontal.
+            cOff = float(center_cutout_props.get('offset_top', 10.0))
+            y_line = max(0.0, min(W_actual, W_actual - cOff))
+            if needs_rotation:
+                x0_rot, y0_rot = rotate_coords(0.0, y_line)
+                x1_rot, y1_rot = rotate_coords(L_actual, y_line)
+                fig.add_shape(type="line", x0=x0_rot, y0=y0_rot, x1=x1_rot, y1=y1_rot, line=dict(color="black", width=1), layer="above")
+            else:
+                fig.add_shape(type="line", x0=0.0, y0=y_line, x1=L_actual, y1=y_line, line=dict(color="black", width=1), layer="above")
         else:
-            fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, line=dict(color="black", width=1, dash="dash"), layer="above")
-            add_pro_dimension(fig, x0, y1, x1, y1, format_number_no_decimal(cW), -30, axis='x', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual)
-            add_pro_dimension(fig, x0, y0, x0, y1, format_number_no_decimal(cH), -30, axis='y', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
+            cW, cH = center_cutout_props['width'], center_cutout_props['height']
+            cOff = center_cutout_props['offset_top']
+            x0, x1 = (L_actual-cW)/2, (L_actual-cW)/2 + cW
+            y1, y0 = W_actual-cOff, W_actual-cOff-cH
+            if needs_rotation:
+                # Transformer les coins du rectangle
+                x0_rot, y0_rot = rotate_coords(x0, y0)
+                x1_rot, y1_rot = rotate_coords(x1, y1)
+                x0_rot2, y1_rot2 = rotate_coords(x0, y1)
+                x1_rot2, y0_rot2 = rotate_coords(x1, y0)
+                fig.add_shape(type="path", 
+                             path=f"M {x0_rot},{y0_rot} L {x1_rot},{y0_rot2} L {x1_rot2},{y1_rot} L {x0_rot2},{y1_rot2} Z",
+                             line=dict(color="black", width=1, dash="dash"), layer="above")
+            else:
+                fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, line=dict(color="black", width=1, dash="dash"), layer="above")
+                add_pro_dimension(fig, x0, y1, x1, y1, format_number_no_decimal(cW), -30, axis='x', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual)
+                add_pro_dimension(fig, x0, y0, x0, y1, format_number_no_decimal(cH), -30, axis='y', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
     
     # --- FEUILLURE (REBATE) POUR LÉGRABOX ---
     if has_rebate:
