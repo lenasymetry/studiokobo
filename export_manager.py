@@ -430,15 +430,17 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                     pts.append((x, y))
                 return pts
 
-            for tx_face, inward_sign in ((tg_x0, -1.0), (td_x0, 1.0)):
-                x_stem = tx_face + inward_sign * groove_depth
-                x_join = tx_face + inward_sign * (groove_depth * 0.58)
+            for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
+                # La forme couvre toute la tranche: bord extérieur -> bord côté face.
+                x_stem = tx_outer
+                x_join = tx_outer + (tx_face - tx_outer) * 0.58
+                full_width = abs(tx_face - tx_outer)
 
                 y_cap_base = y_line - groove_drop * 0.06
                 y_join = y_line - groove_drop * 0.30
                 y_join = max(y0 + 2.0, min(y_cap_base - 1.0, y_join))
 
-                cap_rise = max(1.0, abs(x_join - x_stem) / 2.0)
+                cap_rise = max(1.0, min(full_width * 0.32, abs(x_join - x_stem) * 0.9))
                 bowl_rise = max(1.0, groove_drop - (y_line - y_join))
 
                 cap_pts = _half_round_points_dxf(x_stem, x_join, y_cap_base, cap_rise, n_seg=16, upward=True)
