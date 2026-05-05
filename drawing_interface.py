@@ -1651,43 +1651,59 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_outer_x = x_td_1
 
             def _draw_side_finger_pull_curve(x_face, x_outer):
-                # Gorge en U ouverte par le HAUT, contre le bord EXTÉRIEUR (x_outer).
-                # Le bord extérieur forme le mur gauche/droit de la gorge.
-                # Le bord face (x_face) reste intact.
+                # Forme EXACTE pousse doigt.png :
+                #  Trait 1 (mur ouvert, côté face) : part du haut de la tranche vers le bas
+                #  Grand demi-cercle au fond (r = gw/2)
+                #  Trait 2 (mur fermé, côté extérieur) : remonte
+                #  Petit demi-cercle au sommet du mur ext (prise en main arrondie)
+                #
+                # TRANCHE GAUCHE : le mur OUVERT est à droite (face), le mur FERMÉ à gauche (ext)
+                # TRANCHE DROITE : le mur OUVERT est à gauche (face), le mur FERMÉ à droite (ext)
                 import math
-                gw = min(groove_depth_req, abs(x_outer - x_face) * 0.75)
-                gw = max(4.0, gw)
-                # d > 0 : tranche droite (x_outer > x_face), d < 0 : tranche gauche
+                gw = min(groove_depth_req, abs(x_outer - x_face) * 0.80)
+                gw = max(6.0, gw)
+                r_big   = gw / 2.0
+                r_small = max(3.0, gw * 0.38)
+                # d < 0 = tranche gauche (x_face > x_outer)
+                # d > 0 = tranche droite (x_face < x_outer)
                 d = 1.0 if (x_outer > x_face) else -1.0
-                if d < 0:   # tranche gauche : outer = gauche (plus petit x)
-                    xL = x_outer          # mur gauche = bord extérieur
-                    xR = x_outer + gw     # mur droit = intérieur
-                else:       # tranche droite : outer = droite (plus grand x)
-                    xR = x_outer          # mur droit = bord extérieur
-                    xL = x_outer - gw     # mur gauche = intérieur
-                xC = (xL + xR) / 2.0
-                r_bot = gw / 2.0
-                r_top = max(1.5, gw * 0.18)
-                y_top = W_actual
-                y_arc_center = max(r_bot + 2.0,
-                                   min(y_top - r_top - 1.0,
-                                       y_top - groove_drop_req))
+                if d < 0:   # TRANCHE GAUCHE
+                    x_open = x_face        # mur ouvert = côté face (droite de la tranche)
+                    x_cap  = x_face - gw   # mur fermé  = côté ext (gauche), porte le petit arc
+                    big_cx = x_face - r_big
+                    cap_cx = x_cap + r_small
+                    big_a0, big_a1 =   0, -180  # grand arc : droite->gauche via bas
+                    cap_a0, cap_a1 = 180,    0  # petit arc : gauche->droite via haut
+                else:        # TRANCHE DROITE
+                    x_open = x_face        # mur ouvert = côté face (gauche de la tranche)
+                    x_cap  = x_face + gw   # mur fermé  = côté ext (droite), porte le petit arc
+                    big_cx = x_face + r_big
+                    cap_cx = x_cap - r_small
+                    big_a0, big_a1 = 180, 360   # grand arc : gauche->droite via bas
+                    cap_a0, cap_a1 =   0, 180   # petit arc : droite->gauche via haut
 
-                def arc_seg(cx, cy, r, a0, a1, n=12):
+                y_top    = W_actual
+                y_big_cy = max(r_big + 2.0, y_top - groove_drop_req + r_big)
+                y_cap_cy = max(y_big_cy + r_big + r_small + 4.0,
+                               y_top - groove_drop_req * 0.28)
+
+                def arc_seg(cx, cy, r, a0_deg, a1_deg, n=16):
                     pts = []
                     for i in range(n + 1):
-                        t = math.radians(a0 + (a1 - a0) * i / float(n))
+                        t = math.radians(a0_deg + (a1_deg - a0_deg) * i / float(n))
                         pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
                     return pts
 
                 pts = []
-                pts += arc_seg(xL + r_top, y_top - r_top, r_top, 90, 180, n=8)
-                pts.append((xL, y_arc_center))
-                bot = arc_seg(xC, y_arc_center, r_bot, 180, 360, n=16)
-                pts += bot[1:]
-                pts.append((xR, y_top - r_top))
-                trc = arc_seg(xR - r_top, y_top - r_top, r_top, 0, 90, n=8)
-                pts += trc[1:]
+                # Trait 1 : mur ouvert, du haut vers le grand arc
+                pts.append((x_open, y_top))
+                pts.append((x_open, y_big_cy))
+                # Grand demi-cercle (fond)
+                pts += arc_seg(big_cx, y_big_cy, r_big, big_a0, big_a1, n=18)[1:]
+                # Trait 2 : mur fermé, du grand arc jusqu'au petit arc
+                pts.append((x_cap, y_cap_cy))
+                # Petit demi-cercle (prise en main arrondie)
+                pts += arc_seg(cap_cx, y_cap_cy, r_small, cap_a0, cap_a1, n=12)[1:]
 
                 if needs_rotation:
                     rot = [rotate_coords(px, py) for (px, py) in pts]
