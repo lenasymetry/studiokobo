@@ -1650,58 +1650,36 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_inner_x = x_td_0
             right_outer_x = x_td_1
 
-            def _arc_points(cx, cy, radius, a_start_deg, a_end_deg, n_seg=16):
-                """Points d'un arc de cercle (sens horaire si a_end < a_start)."""
+            def _draw_side_finger_pull_curve(x_face, x_outer):
+                # Le bord extérieur (x_outer) reste INTACT.
+                # On dessine uniquement un arc de cercle concave côté intérieur (x_face),
+                # représentant la prise de doigts creusée dans l'épaisseur.
+                # L'arc relie (x_face, y_line + h/2) à (x_face, y_line - h/2)
+                # en bombant vers x_outer de la valeur groove_depth.
                 import math
+                h = groove_drop_req                          # hauteur de la gorge
+                s = min(groove_depth_req,                   # sagitta (profondeur vers bord ext)
+                        abs(x_outer - x_face) * 0.85)
+                s = max(1.0, s)
+                # Rayon de l'arc par la relation corde / sagitta
+                R = ((h / 2.0) ** 2 + s ** 2) / (2.0 * s)
+                # Direction de x_face vers x_outer
+                d_out = 1.0 if (x_outer > x_face) else -1.0
+                # Centre du cercle du côté opposé au bombement
+                cx = x_face - d_out * (R - s)
+                cy = y_line
+                # Angles du cercle vers les deux extrémités de l'arc
+                dx = x_face - cx   # = d_out * (R - s)
+                a_start = math.atan2(h / 2.0, dx)
+                a_end   = math.atan2(-h / 2.0, dx)
+                # Pour direction vers la gauche, le sweep passe par π : ajustement
+                if d_out < 0 and a_end < a_start:
+                    a_end += 2.0 * math.pi
+                n_seg = 24
                 pts = []
-                a_start = math.radians(a_start_deg)
-                a_end = math.radians(a_end_deg)
                 for i in range(n_seg + 1):
                     t = a_start + (a_end - a_start) * i / float(n_seg)
-                    pts.append((cx + radius * math.cos(t), cy + radius * math.sin(t)))
-                return pts
-
-            def _draw_side_finger_pull_curve(x_face, x_outer):
-                # Profil identique à passe-doigts.png :
-                # Gorge en U creusée depuis le bord extérieur (x_outer) vers l'intérieur.
-                # x_outer = bord extérieur de la tranche, x_face = bord face.
-                # direction : +1 si x_face > x_outer (tranche droite), -1 sinon (tranche gauche)
-                import math
-                direction = 1.0 if (x_face > x_outer) else -1.0  # vers l'intérieur
-                r_corner = max(1.5, groove_depth_req * 0.15)   # rayon des angles arrondis
-                groove_w = min(groove_depth_req, abs(x_face - x_outer) * 0.6)  # largeur de la gorge
-                groove_h = groove_drop_req  # hauteur de la gorge
-                r_bottom = min(groove_w / 2.0, groove_h * 0.35)  # rayon du fond arrondi
-
-                # Positions horizontales (x)
-                x_wall_outer = x_outer  # mur extérieur = bord extérieur de la tranche
-                x_wall_inner = x_outer + direction * groove_w  # mur intérieur de la gorge
-
-                # Positions verticales (y) - gorge centrée autour de y_line
-                y_groove_top = y_line + groove_h / 2.0
-                y_groove_bot_straight = y_line - groove_h / 2.0 + r_bottom
-                y_groove_top_straight = y_groove_top - r_corner
-
-                # Construit le contour de la gorge (polyline fermée = trait)
-                # Sens: partant du coin supérieur extérieur en sens trigonométrique
-                pts = []
-
-                # Coin supérieur extérieur: arrondi
-                pts += _arc_points(x_wall_outer + direction * r_corner, y_groove_top - r_corner,
-                                   r_corner, 90, 180 if direction < 0 else 0, n_seg=8)
-                # Mur extérieur (descend)
-                pts.append((x_wall_outer, y_groove_top_straight))
-                pts.append((x_wall_outer, y_groove_bot_straight))
-                # Fond arrondi
-                cx_bot = (x_wall_outer + x_wall_inner) / 2.0
-                pts += _arc_points(cx_bot, y_groove_bot_straight,
-                                   r_bottom, 180, 0, n_seg=16)
-                # Mur intérieur (remonte)
-                pts.append((x_wall_inner, y_groove_bot_straight))
-                pts.append((x_wall_inner, y_groove_top_straight))
-                # Coin supérieur intérieur: arrondi
-                pts += _arc_points(x_wall_inner - direction * r_corner, y_groove_top - r_corner,
-                                   r_corner, 0 if direction < 0 else 90, 90 if direction < 0 else 180, n_seg=8)
+                    pts.append((cx + R * math.cos(t), cy + R * math.sin(t)))
 
                 if needs_rotation:
                     rot = [rotate_coords(px, py) for (px, py) in pts]
