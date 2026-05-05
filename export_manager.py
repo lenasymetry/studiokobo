@@ -419,26 +419,41 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
             for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
+                # Gorge en U ouverte par le HAUT (y1), contre le bord face (tx_face).
                 # Le bord extérieur (tx_outer) reste INTACT.
-                # On dessine uniquement un arc de cercle concave côté intérieur (tx_face).
                 import math
-                h = groove_drop
-                s = min(groove_depth, abs(tx_outer - tx_face) * 0.85)
-                s = max(1.0, s)
-                R = ((h / 2.0) ** 2 + s ** 2) / (2.0 * s)
-                d_out = 1.0 if (tx_outer > tx_face) else -1.0
-                cx_arc = tx_face - d_out * (R - s)
-                cy_arc = y_line
-                dx = tx_face - cx_arc
-                a_start = math.atan2(h / 2.0, dx)
-                a_end   = math.atan2(-h / 2.0, dx)
-                if d_out < 0 and a_end < a_start:
-                    a_end += 2.0 * math.pi
-                n_seg = 24
+                gw = min(groove_depth, abs(tx_outer - tx_face) * 0.75)
+                gw = max(4.0, gw)
+                d = 1.0 if (tx_outer > tx_face) else -1.0
+                if d > 0:
+                    xL = tx_face
+                    xR = tx_face + gw
+                else:
+                    xL = tx_face - gw
+                    xR = tx_face
+                xC = (xL + xR) / 2.0
+                r_bot = gw / 2.0
+                r_top = max(1.5, gw * 0.18)
+                y_top = y1
+                y_arc_center = max(y0 + r_bot + 2.0,
+                                   min(y_top - r_top - 1.0,
+                                       y_top - groove_drop))
+
+                def arc_seg_dxf(cx, cy, r, a0, a1, n=12):
+                    pts = []
+                    for i in range(n + 1):
+                        t = math.radians(a0 + (a1 - a0) * i / float(n))
+                        pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
+                    return pts
+
                 pts = []
-                for i in range(n_seg + 1):
-                    t = a_start + (a_end - a_start) * i / float(n_seg)
-                    pts.append((cx_arc + R * math.cos(t), cy_arc + R * math.sin(t)))
+                pts += arc_seg_dxf(xL + r_top, y_top - r_top, r_top, 90, 180, n=8)
+                pts.append((xL, y_arc_center))
+                bot = arc_seg_dxf(xC, y_arc_center, r_bot, 180, 360, n=16)
+                pts += bot[1:]
+                pts.append((xR, y_top - r_top))
+                trc = arc_seg_dxf(xR - r_top, y_top - r_top, r_top, 0, 90, n=8)
+                pts += trc[1:]
                 msp.add_lwpolyline(pts, dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
