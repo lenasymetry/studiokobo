@@ -2126,10 +2126,10 @@ with col1:
                                     # center_x est le centre de l'ensemble du double montant
                                     center_x = float(p.get('position_x', (min_x + max_x) / 2.0))
                                     th = float(p.get('thickness', 19.0))
-                                    # Pour centrer l'ensemble : le premier panneau commence à center_x - thickness
-                                    # et le deuxième commence à center_x (ils sont collés)
-                                    pos_left = center_x - th
-                                    pos_right = center_x
+                                    # Les positions stockées sont les centres de chaque montant.
+                                    # Pour centrer le double montant, les centres sont espacés de l'épaisseur.
+                                    pos_left = center_x - th / 2.0
+                                    pos_right = center_x + th / 2.0
                                     for px in (pos_left, pos_right):
                                         d_copy = copy.deepcopy(p)
                                         d_copy['position_x'] = px
