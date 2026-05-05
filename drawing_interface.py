@@ -1635,31 +1635,74 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             else:
                 fig.add_shape(type="line", x0=0.0, y0=y_line, x1=L_actual, y1=y_line, line=dict(color="black", width=1), layer="above")
 
-            # Ajouter aussi la forme de découpe sur les 2 tranches latérales.
+            # Ajouter aussi la forme de découpe sur les 2 tranches latérales:
+            # entrée arrondie + segment vertical remontant vers le haut de la face.
             groove_depth_req = float(center_cutout_props.get('depth', 12.0))
             groove_drop_req = float(center_cutout_props.get('drop', 35.0))
             groove_depth = max(1.0, min(groove_depth_req, max(1.0, TRANCHE_THICK - 1.0)))
-            groove_drop = max(5.0, min(groove_drop_req, max(5.0, y_line - 2.0)))
-            y_groove_bottom = max(0.0, y_line - groove_drop)
+            groove_drop = max(5.0, min(groove_drop_req, max(6.0, y_line - 2.0)))
+            arc_radius = max(1.0, min(groove_depth, groove_drop))
 
             left_inner_x = x_tg_0
             left_step_x = x_tg_0 - groove_depth
             right_inner_x = x_td_0
             right_step_x = x_td_0 + groove_depth
 
-            side_segments = [
-                ((left_inner_x, y_line), (left_step_x, y_line)),
-                ((left_step_x, y_line), (left_step_x, y_groove_bottom)),
-                ((right_inner_x, y_line), (right_step_x, y_line)),
-                ((right_step_x, y_line), (right_step_x, y_groove_bottom)),
-            ]
-            for (sx0, sy0), (sx1, sy1) in side_segments:
-                if needs_rotation:
-                    sx0r, sy0r = rotate_coords(sx0, sy0)
-                    sx1r, sy1r = rotate_coords(sx1, sy1)
-                    fig.add_shape(type="line", x0=sx0r, y0=sy0r, x1=sx1r, y1=sy1r, line=dict(color="black", width=1), layer="above")
+            def _draw_side_finger_pull_curve(x_inner, x_step):
+                import math
+
+                # Centre de l'arrondi au niveau de la ligne d'ouverture.
+                cx = x_step
+                cy = y_line
+                if x_step < x_inner:
+                    theta_start, theta_end = 0.0, -math.pi / 2.0
                 else:
-                    fig.add_shape(type="line", x0=sx0, y0=sy0, x1=sx1, y1=sy1, line=dict(color="black", width=1), layer="above")
+                    theta_start, theta_end = math.pi, 3.0 * math.pi / 2.0
+
+                n_seg = 14
+                curve_pts = []
+                for i in range(n_seg + 1):
+                    t = i / float(n_seg)
+                    th = theta_start + (theta_end - theta_start) * t
+                    px = cx + arc_radius * math.cos(th)
+                    py = cy + arc_radius * math.sin(th)
+                    curve_pts.append((px, py))
+
+                # Segment vertical qui remonte vers le haut de la face.
+                x_vert = x_step
+                y_vert_start = y_line - arc_radius
+                y_vert_end = W_actual
+
+                if needs_rotation:
+                    curve_rot = [rotate_coords(px, py) for (px, py) in curve_pts]
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[p[0] for p in curve_rot],
+                            y=[p[1] for p in curve_rot],
+                            mode='lines',
+                            line=dict(color='black', width=1),
+                            hoverinfo='skip',
+                            showlegend=False,
+                        )
+                    )
+                    x0r, y0r = rotate_coords(x_vert, y_vert_start)
+                    x1r, y1r = rotate_coords(x_vert, y_vert_end)
+                    fig.add_shape(type="line", x0=x0r, y0=y0r, x1=x1r, y1=y1r, line=dict(color="black", width=1), layer="above")
+                else:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[p[0] for p in curve_pts],
+                            y=[p[1] for p in curve_pts],
+                            mode='lines',
+                            line=dict(color='black', width=1),
+                            hoverinfo='skip',
+                            showlegend=False,
+                        )
+                    )
+                    fig.add_shape(type="line", x0=x_vert, y0=y_vert_start, x1=x_vert, y1=y_vert_end, line=dict(color="black", width=1), layer="above")
+
+            _draw_side_finger_pull_curve(left_inner_x, left_step_x)
+            _draw_side_finger_pull_curve(right_inner_x, right_step_x)
         else:
             cW, cH = center_cutout_props['width'], center_cutout_props['height']
             cOff = center_cutout_props['offset_top']
