@@ -61,6 +61,46 @@ def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, i
     # Fallback: ne jamais renvoyer une liste vide pour éviter de perdre la feuille d'usinage.
     return filtered if filtered else ([max_pos] if max_pos > 0.0 else [])
 
+def _drawer_handle_signature(drp):
+    """Retourne une signature hashable de poignée tiroir pour le regroupement des plans."""
+    handle_type = str(drp.get('drawer_handle_type', 'none'))
+    if handle_type == 'integrated_cutout':
+        return (
+            'integrated_cutout',
+            float(drp.get('drawer_handle_width', 150.0)),
+            float(drp.get('drawer_handle_height', 40.0)),
+            float(drp.get('drawer_handle_offset_top', 10.0)),
+        )
+    if handle_type == 'finger_pull':
+        return (
+            'finger_pull',
+            float(drp.get('drawer_handle_offset_top', 10.0)),
+            float(drp.get('drawer_finger_pull_depth', 12.0)),
+            float(drp.get('drawer_finger_pull_drop', 35.0)),
+        )
+    return None
+
+def _handle_signature_to_cutout_props(signature):
+    """Convertit une signature de poignée tiroir en dict de paramètres de dessin."""
+    if not signature:
+        return None
+    sig_type = str(signature[0])
+    if sig_type == 'integrated_cutout':
+        return {
+            'type': 'integrated_cutout',
+            'width': float(signature[1]),
+            'height': float(signature[2]),
+            'offset_top': float(signature[3]),
+        }
+    if sig_type == 'finger_pull':
+        return {
+            'type': 'finger_pull',
+            'offset_top': float(signature[1]),
+            'depth': float(signature[2]),
+            'drop': float(signature[3]),
+        }
+    return None
+
 def _safe_add_text(msp, text, dxfattribs, placement=None, align=None):
     if text is None:
         return None
@@ -301,7 +341,7 @@ def _add_tranche_dxf(msp, x_coords, y_coords, Tp, layer="TRANCHES"):
     poly_pts.append(poly_pts[0])
     msp.add_lwpolyline(poly_pts, dxfattribs={"layer": layer})
 
-def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_plan, origin_x=0.0, origin_y=0.0, ch=None, has_rebate=False):
+def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_plan, origin_x=0.0, origin_y=0.0, ch=None, has_rebate=False, center_cutout_props=None):
     Lp = float(Lp)
     Wp = float(Wp)
     Tp = float(Tp)
@@ -357,6 +397,42 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
 
     _add_linear_dimension_dxf(msp, base=(x1 + 80.0, tb_y0), p1=(x1, tb_y0), p2=(x1, tb_y1), angle=90, layer="COTES")
     _add_linear_dimension_dxf(msp, base=(tg_x0, y1 + 80.0), p1=(tg_x0, y1), p2=(tg_x1, y1), angle=0, layer="COTES")
+
+    # Usinage poignée sur façade tiroir.
+    if center_cutout_props:
+        cut_type = str(center_cutout_props.get('type', 'integrated_cutout'))
+        if cut_type == 'finger_pull':
+            # Exigence métier: sur la FACE, afficher uniquement un trait à la hauteur de la découpe.
+            offset_top = float(center_cutout_props.get('offset_top', 10.0))
+            y_line = max(y0 + 2.0, min(y1 - 2.0, y1 - offset_top))
+            face_margin = max(5.0, min(25.0, Lp * 0.02))
+            msp.add_line((x0 + face_margin, y_line), (x1 - face_margin, y_line), dxfattribs={"layer": "FEUILLURE", "color": 1})
+
+            # Sur les 2 tranches latérales: même profil de passe-doigt.
+            groove_depth = max(1.0, float(center_cutout_props.get('depth', 12.0)))
+            groove_drop = max(5.0, float(center_cutout_props.get('drop', 35.0)))
+            groove_drop = min(groove_drop, max(5.0, y_line - y0 - 2.0))
+            profile_layer = {"layer": "FEUILLURE", "color": 1}
+
+            for tx_inner, sign in ((tg_x0, -1.0), (td_x0, 1.0)):
+                x_step = tx_inner + sign * groove_depth
+                y_bottom = y_line - groove_drop
+                msp.add_line((tx_inner, y_line), (x_step, y_line), dxfattribs=profile_layer)
+                msp.add_line((x_step, y_line), (x_step, y_bottom), dxfattribs=profile_layer)
+        else:
+            # Découpe poignée intégrée: rectangle centré sur la façade.
+            cW = float(center_cutout_props.get('width', 150.0))
+            cH = float(center_cutout_props.get('height', 40.0))
+            cOff = float(center_cutout_props.get('offset_top', 10.0))
+            cW = min(max(1.0, cW), max(1.0, Lp - 2.0))
+            cH = min(max(1.0, cH), max(1.0, Wp - 2.0))
+            cx0 = x0 + (Lp - cW) / 2.0
+            cx1 = cx0 + cW
+            cy1 = y0 + Wp - cOff
+            cy0 = cy1 - cH
+            cy0 = max(y0 + 1.0, cy0)
+            cy1 = min(y1 - 1.0, cy1)
+            msp.add_lwpolyline([(cx0, cy0), (cx1, cy0), (cx1, cy1), (cx0, cy1), (cx0, cy0)], dxfattribs={"layer": "FEUILLURE", "color": 1})
 
     annotated_diams = set()
     
@@ -764,6 +840,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 origin_y=0.0,
                 ch=ch,
                 has_rebate=has_rebate,
+                center_cutout_props=cut,
             )
             dxf_plan_layout_specs.append((str(title), bbox))
             dxf_plan_index += 1
@@ -1133,7 +1210,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                             elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
 
-                    # Tiroir à l'anglaise: perçages décalés de 50 mm depuis le bord.
+                    # Tiroir à l'anglaise: perçages décalés de 40 mm depuis le bord.
                     # (doit être APRÈS tout le calcul des positions, quel que soit le cas de profondeur)
                     x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
 
@@ -1251,13 +1328,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     inner_thickness = float(drp.get('inner_thickness', 16.0))
                     face_material = str(drp.get('material', 'Matière Tiroir'))
                     inner_material = str(drp.get('material_inner', cab.get('material_body', 'Matière Corps')))
-                    cutout = None
-                    if drp.get('drawer_handle_type') == 'integrated_cutout':
-                        cutout = (
-                            drp.get('drawer_handle_width', 150.0),
-                            drp.get('drawer_handle_height', 40.0),
-                            drp.get('drawer_handle_offset_top', 10.0)
-                        )
+                    cutout = _drawer_handle_signature(drp)
                     
                     if drawer_system == 'LÉGRABOX':
                         legrabox_specs = get_legrabox_specs()
@@ -1347,10 +1418,8 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             d_holes_t.append({'type': 'vis_dos', 'x': 9.0, 'y': dy, 'diam_str': "⌀3"}) 
                             d_holes_t.append({'type': 'vis_dos', 'x': d_L_t - 9.0, 'y': dy, 'diam_str': "⌀3"}) 
                     
-                    # Convertir cutout tuple en dict si présent
-                    cutout_dict = None
-                    if cutout:
-                        cutout_dict = {'width': cutout[0], 'height': cutout[1], 'offset_top': cutout[2]}
+                    # Convertir la signature de poignée en paramètres de découpe.
+                    cutout_dict = _handle_signature_to_cutout_props(cutout)
                     
                     # Créer un proj avec la quantité pour ce groupe
                     proj_group = proj.copy()
@@ -1904,7 +1973,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                 elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
 
-                # Tiroir à l'anglaise: perçages décalés de 50 mm depuis le bord.
+                # Tiroir à l'anglaise: perçages décalés de 40 mm depuis le bord.
                 x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
                 
                 zone_x_min = None
@@ -2006,13 +2075,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 tech_type = drp.get('drawer_tech_type', 'K')
                 dr_thickness = drp.get('drawer_face_thickness', 19.0)
                 inner_thickness = float(drp.get('inner_thickness', 16.0))
-                cutout = None
-                if drp.get('drawer_handle_type') == 'integrated_cutout':
-                    cutout = (
-                        drp.get('drawer_handle_width', 150.0),
-                        drp.get('drawer_handle_height', 40.0),
-                        drp.get('drawer_handle_offset_top', 10.0)
-                    )
+                cutout = _drawer_handle_signature(drp)
                 
                 if drawer_system == 'LÉGRABOX':
                     legrabox_specs = get_legrabox_specs()
@@ -2106,10 +2169,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                             bottom_holes.append({'type': 'vis_fond', 'x': 9.0, 'y': dy, 'diam_str': "⌀3"})
                             bottom_holes.append({'type': 'vis_fond', 'x': fond_L - 9.0, 'y': dy, 'diam_str': "⌀3"})
                 
-                # Convertir cutout tuple en dict si présent
-                cutout_dict = None
-                if cutout:
-                    cutout_dict = {'width': cutout[0], 'height': cutout[1], 'offset_top': cutout[2]}
+                # Convertir la signature de poignée en paramètres de découpe.
+                cutout_dict = _handle_signature_to_cutout_props(cutout)
                 
                 # Créer un proj avec la quantité pour ce groupe
                 proj_group = proj.copy()
