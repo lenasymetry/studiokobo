@@ -1646,7 +1646,9 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             # Ajouter aussi la forme de découpe sur les 2 tranches latérales:
             # profil identique à la PJ (petit dôme haut + creux arrondi + remontée sur la face).
             left_inner_x = x_tg_0
+            left_outer_x = x_tg_1
             right_inner_x = x_td_0
+            right_outer_x = x_td_1
 
             def _half_round_points(x_start, x_end, y_base, rise, n_seg=18, upward=True):
                 import math
@@ -1660,10 +1662,11 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     pts.append((x, y))
                 return pts
 
-            def _draw_side_finger_pull_curve(x_face, inward_sign):
-                depth_local = groove_depth
-                x_stem = x_face + inward_sign * depth_local
-                x_join = x_face + inward_sign * (depth_local * 0.58)
+            def _draw_side_finger_pull_curve(x_face, x_outer):
+                # La forme doit couvrir toute l'épaisseur de tranche: bord extérieur -> bord intérieur.
+                x_stem = x_outer
+                x_join = x_outer + (x_face - x_outer) * 0.58
+                full_width = abs(x_face - x_outer)
 
                 # Niveaux verticaux de la forme de la PJ.
                 y_cap_base = y_line - groove_drop_req * 0.06
@@ -1671,7 +1674,7 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                 y_join = max(2.0, min(y_cap_base - 1.0, y_join))
 
                 # Petit dôme (haut) et grand creux (bas).
-                cap_rise = max(1.0, abs(x_join - x_stem) / 2.0)
+                cap_rise = max(1.0, min(full_width * 0.32, abs(x_join - x_stem) * 0.9))
                 bowl_rise = max(1.0, groove_drop_req - (y_line - y_join))
 
                 cap_pts = _half_round_points(x_stem, x_join, y_cap_base, cap_rise, n_seg=16, upward=True)
@@ -1699,8 +1702,8 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     for (sx0, sy0), (sx1, sy1) in segs:
                         fig.add_shape(type="line", x0=sx0, y0=sy0, x1=sx1, y1=sy1, line=dict(color="black", width=1), layer="above")
 
-            _draw_side_finger_pull_curve(left_inner_x, inward_sign=-1.0)
-            _draw_side_finger_pull_curve(right_inner_x, inward_sign=1.0)
+            _draw_side_finger_pull_curve(left_inner_x, left_outer_x)
+            _draw_side_finger_pull_curve(right_inner_x, right_outer_x)
         else:
             cW, cH = center_cutout_props['width'], center_cutout_props['height']
             cOff = center_cutout_props['offset_top']
