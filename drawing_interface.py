@@ -1651,19 +1651,28 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_outer_x = x_td_1
 
             def _draw_side_finger_pull_curve(x_face, x_outer):
-                # Gorge centrée dans l'épaisseur de la tranche.
-                # Chemin : mur face descend → grand arc BAS → mur ext remonte
-                #           → petit arc bombe vers l'EXTÉRIEUR (gauche ou droite).
-                # d > 0 : tranche droite (x_face < x_outer)
-                # d < 0 : tranche gauche (x_face > x_outer)
+                # Profil pousse-doigt identique a la reference:
+                #   1) petit demi-cercle horizontal bombe vers le haut,
+                #   2) trait vertical descendant (cote exterieur),
+                #   3) grand demi-cercle horizontal bombe vers le bas,
+                #   4) trait vertical remontant jusqu'en haut (cote face).
+                # Tranche gauche/droite en symetrie miroir.
                 import math
-                gw = max(6.0, min(groove_depth_req, abs(x_outer - x_face) * 0.85))
-                r_big   = gw / 2.0
-                r_small = max(3.0, gw * 0.30)
-                x_tc = (x_face + x_outer) / 2.0   # centre de la tranche
-                xL = x_tc - r_big
-                xR = x_tc + r_big
-                d  = 1.0 if (x_outer > x_face) else -1.0
+                tranche_w = abs(x_outer - x_face)
+                gw = max(6.0, min(groove_depth_req, tranche_w * 0.80))
+                r_big = gw / 2.0
+                r_small = max(2.0, gw * 0.28)
+                d = 1.0 if (x_outer > x_face) else -1.0
+
+                # Positionnement de la gorge proche face, comme la reference.
+                face_offset = max(2.0, min(tranche_w * 0.35, tranche_w - gw - 2.0))
+                if d > 0:  # tranche droite: face a gauche
+                    xL = x_face + face_offset
+                    xR = xL + gw
+                else:      # tranche gauche: face a droite
+                    xR = x_face - face_offset
+                    xL = xR - gw
+                xC = (xL + xR) / 2.0
 
                 y_top = W_actual - cOff
                 y_bot = max(r_big + 2.0, y_top - groove_drop_req)
@@ -1676,18 +1685,24 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     return pts
 
                 pts = []
-                if d > 0:  # TRANCHE DROITE : face=gauche(xL), outer=droite(xR)
-                    pts.append((xL, W_actual))       # haut mur face
-                    pts.append((xL, y_bot))          # mur face descend
-                    pts += arc_seg(x_tc, y_bot, r_big, 180, 360, n=18)[1:]  # grand arc BAS : xL→xR
-                    pts.append((xR, y_top - r_small))                       # mur ext remonte
-                    pts += arc_seg(xR, y_top, r_small, -90, 90, n=12)[1:]  # petit arc bombe DROITE
-                else:      # TRANCHE GAUCHE : face=droite(xR), outer=gauche(xL)
-                    pts.append((xR, W_actual))       # haut mur face
-                    pts.append((xR, y_bot))          # mur face descend
-                    pts += arc_seg(x_tc, y_bot, r_big, 0, -180, n=18)[1:]  # grand arc BAS : xR→xL
-                    pts.append((xL, y_top + r_small))                       # mur ext remonte
-                    pts += arc_seg(xL, y_top, r_small, 90, 270, n=12)[1:]  # petit arc bombe GAUCHE
+                if d > 0:  # TRANCHE DROITE : petit arc vers la droite
+                    # petit demi-cercle haut (xL -> xR) bombe vers le haut
+                    x_top_end = min(xR, xL + 2.0 * r_small)
+                    x_top_c = (xL + x_top_end) / 2.0
+                    pts += arc_seg(x_top_c, y_top, (x_top_end - xL) / 2.0, 180, 0, n=12)
+                    # vertical exterieur (descend)
+                    pts.append((xR, y_bot))
+                    # grand demi-cercle bas (xR -> xL) bombe vers le bas
+                    pts += arc_seg(xC, y_bot, r_big, 0, -180, n=18)[1:]
+                    # vertical face (remonte jusqu'en haut)
+                    pts.append((xL, W_actual))
+                else:      # TRANCHE GAUCHE : petit arc vers la gauche
+                    x_top_end = max(xL, xR - 2.0 * r_small)
+                    x_top_c = (xR + x_top_end) / 2.0
+                    pts += arc_seg(x_top_c, y_top, (xR - x_top_end) / 2.0, 0, 180, n=12)
+                    pts.append((xL, y_bot))
+                    pts += arc_seg(xC, y_bot, r_big, 180, 360, n=18)[1:]
+                    pts.append((xR, W_actual))
 
                 if needs_rotation:
                     rot = [rotate_coords(px, py) for (px, py) in pts]
