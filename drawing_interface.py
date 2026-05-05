@@ -1650,57 +1650,68 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_inner_x = x_td_0
             right_outer_x = x_td_1
 
-            def _half_round_points(x_start, x_end, y_base, rise, n_seg=18, upward=True):
+            def _arc_points(cx, cy, radius, a_start_deg, a_end_deg, n_seg=16):
+                """Points d'un arc de cercle (sens horaire si a_end < a_start)."""
                 import math
                 pts = []
+                a_start = math.radians(a_start_deg)
+                a_end = math.radians(a_end_deg)
                 for i in range(n_seg + 1):
-                    u = i / float(n_seg)
-                    x = x_start + (x_end - x_start) * u
-                    val = max(0.0, 1.0 - (2.0 * u - 1.0) ** 2)
-                    y_off = float(rise) * math.sqrt(val)
-                    y = y_base + y_off if upward else y_base - y_off
-                    pts.append((x, y))
+                    t = a_start + (a_end - a_start) * i / float(n_seg)
+                    pts.append((cx + radius * math.cos(t), cy + radius * math.sin(t)))
                 return pts
 
             def _draw_side_finger_pull_curve(x_face, x_outer):
-                # La forme doit couvrir toute l'épaisseur de tranche: bord extérieur -> bord intérieur.
-                x_stem = x_outer
-                x_join = x_outer + (x_face - x_outer) * 0.58
-                full_width = abs(x_face - x_outer)
+                # Profil identique à passe-doigts.png :
+                # Gorge en U creusée depuis le bord extérieur (x_outer) vers l'intérieur.
+                # x_outer = bord extérieur de la tranche, x_face = bord face.
+                # direction : +1 si x_face > x_outer (tranche droite), -1 sinon (tranche gauche)
+                import math
+                direction = 1.0 if (x_face > x_outer) else -1.0  # vers l'intérieur
+                r_corner = max(1.5, groove_depth_req * 0.15)   # rayon des angles arrondis
+                groove_w = min(groove_depth_req, abs(x_face - x_outer) * 0.6)  # largeur de la gorge
+                groove_h = groove_drop_req  # hauteur de la gorge
+                r_bottom = min(groove_w / 2.0, groove_h * 0.35)  # rayon du fond arrondi
 
-                # Niveaux verticaux de la forme de la PJ.
-                y_cap_base = y_line - groove_drop_req * 0.06
-                y_join = y_line - groove_drop_req * 0.30
-                y_join = max(2.0, min(y_cap_base - 1.0, y_join))
+                # Positions horizontales (x)
+                x_wall_outer = x_outer  # mur extérieur = bord extérieur de la tranche
+                x_wall_inner = x_outer + direction * groove_w  # mur intérieur de la gorge
 
-                # Petit dôme (haut) et grand creux (bas).
-                cap_rise = max(1.0, min(full_width * 0.32, abs(x_join - x_stem) * 0.9))
-                bowl_rise = max(1.0, groove_drop_req - (y_line - y_join))
+                # Positions verticales (y) - gorge centrée autour de y_line
+                y_groove_top = y_line + groove_h / 2.0
+                y_groove_bot_straight = y_line - groove_h / 2.0 + r_bottom
+                y_groove_top_straight = y_groove_top - r_corner
 
-                cap_pts = _half_round_points(x_stem, x_join, y_cap_base, cap_rise, n_seg=16, upward=True)
-                bowl_pts = _half_round_points(x_join, x_face, y_join, bowl_rise, n_seg=22, upward=False)
+                # Construit le contour de la gorge (polyline fermée = trait)
+                # Sens: partant du coin supérieur extérieur en sens trigonométrique
+                pts = []
 
-                # Segments verticaux: petit jambage + remontée sur la face.
-                segs = [
-                    ((x_stem, y_cap_base), (x_stem, y_join)),
-                    ((x_join, y_cap_base), (x_join, y_join)),
-                    ((x_face, y_join), (x_face, W_actual)),
-                ]
+                # Coin supérieur extérieur: arrondi
+                pts += _arc_points(x_wall_outer + direction * r_corner, y_groove_top - r_corner,
+                                   r_corner, 90, 180 if direction < 0 else 0, n_seg=8)
+                # Mur extérieur (descend)
+                pts.append((x_wall_outer, y_groove_top_straight))
+                pts.append((x_wall_outer, y_groove_bot_straight))
+                # Fond arrondi
+                cx_bot = (x_wall_outer + x_wall_inner) / 2.0
+                pts += _arc_points(cx_bot, y_groove_bot_straight,
+                                   r_bottom, 180, 0, n_seg=16)
+                # Mur intérieur (remonte)
+                pts.append((x_wall_inner, y_groove_bot_straight))
+                pts.append((x_wall_inner, y_groove_top_straight))
+                # Coin supérieur intérieur: arrondi
+                pts += _arc_points(x_wall_inner - direction * r_corner, y_groove_top - r_corner,
+                                   r_corner, 0 if direction < 0 else 90, 90 if direction < 0 else 180, n_seg=8)
 
                 if needs_rotation:
-                    cap_rot = [rotate_coords(px, py) for (px, py) in cap_pts]
-                    bowl_rot = [rotate_coords(px, py) for (px, py) in bowl_pts]
-                    fig.add_trace(go.Scatter(x=[p[0] for p in cap_rot], y=[p[1] for p in cap_rot], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
-                    fig.add_trace(go.Scatter(x=[p[0] for p in bowl_rot], y=[p[1] for p in bowl_rot], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
-                    for (sx0, sy0), (sx1, sy1) in segs:
-                        x0r, y0r = rotate_coords(sx0, sy0)
-                        x1r, y1r = rotate_coords(sx1, sy1)
-                        fig.add_shape(type="line", x0=x0r, y0=y0r, x1=x1r, y1=y1r, line=dict(color="black", width=1), layer="above")
+                    rot = [rotate_coords(px, py) for (px, py) in pts]
+                    fig.add_trace(go.Scatter(x=[p[0] for p in rot], y=[p[1] for p in rot],
+                                            mode='lines', line=dict(color='black', width=1),
+                                            hoverinfo='skip', showlegend=False))
                 else:
-                    fig.add_trace(go.Scatter(x=[p[0] for p in cap_pts], y=[p[1] for p in cap_pts], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
-                    fig.add_trace(go.Scatter(x=[p[0] for p in bowl_pts], y=[p[1] for p in bowl_pts], mode='lines', line=dict(color='black', width=1), hoverinfo='skip', showlegend=False))
-                    for (sx0, sy0), (sx1, sy1) in segs:
-                        fig.add_shape(type="line", x0=sx0, y0=sy0, x1=sx1, y1=sy1, line=dict(color="black", width=1), layer="above")
+                    fig.add_trace(go.Scatter(x=[p[0] for p in pts], y=[p[1] for p in pts],
+                                            mode='lines', line=dict(color='black', width=1),
+                                            hoverinfo='skip', showlegend=False))
 
             _draw_side_finger_pull_curve(left_inner_x, left_outer_x)
             _draw_side_finger_pull_curve(right_inner_x, right_outer_x)
