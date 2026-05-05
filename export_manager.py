@@ -419,24 +419,20 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
             for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # Chemin continu :
-                #   arc haut (bombe vers le HAUT)  --> trait ext (descend)
-                #   --> arc bas (bombe vers le BAS) --> trait face (remonte jusqu'au HAUT)
+                # Gorge centrée dans l'épaisseur de la tranche.
+                # Chemin : mur face descend → grand arc BAS → mur ext remonte
+                #           → petit arc bombe vers l'EXTÉRIEUR.
                 import math
-                gw = max(6.0, min(groove_depth, abs(tx_outer - tx_face) * 0.80))
-                r  = gw / 2.0
+                gw = max(6.0, min(groove_depth, abs(tx_outer - tx_face) * 0.85))
+                r_big   = gw / 2.0
+                r_small = max(3.0, gw * 0.30)
+                x_tc = (tx_face + tx_outer) / 2.0
+                xL = x_tc - r_big
+                xR = x_tc + r_big
                 d  = 1.0 if (tx_outer > tx_face) else -1.0
 
-                if d > 0:   # TRANCHE DROITE : tx_face = gauche
-                    xL = tx_face
-                    xR = tx_face + gw
-                else:       # TRANCHE GAUCHE : tx_face = droite
-                    xR = tx_face
-                    xL = tx_face - gw
-                xC = (xL + xR) / 2.0
-
-                y_top = y1 - offset_top       # centre arc haut
-                y_bot = max(y0 + r + 2.0, y_top - groove_drop)  # centre arc bas
+                y_top = y1 - offset_top
+                y_bot = max(y0 + r_big + 2.0, y_top - groove_drop)
 
                 def arc_seg_dxf(cx, cy, r, a0_deg, a1_deg, n=18):
                     pts = []
@@ -446,16 +442,18 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                     return pts
 
                 pts_dxf = []
-                # Arc haut : (xL, y_top) → (xR, y_top) via sommet (bombe HAUT)
-                pts_dxf += arc_seg_dxf(xC, y_top, r, 180, 0, n=18)
-                if d > 0:   # tranche droite
-                    pts_dxf.append((xR, y_bot))
-                    pts_dxf += arc_seg_dxf(xC, y_bot, r, 0, -180, n=18)[1:]
+                if d > 0:  # TRANCHE DROITE : face=gauche(xL), outer=droite(xR)
                     pts_dxf.append((xL, y1))
-                else:       # tranche gauche
                     pts_dxf.append((xL, y_bot))
-                    pts_dxf += arc_seg_dxf(xC, y_bot, r, 180, 360, n=18)[1:]
+                    pts_dxf += arc_seg_dxf(x_tc, y_bot, r_big, 180, 360, n=18)[1:]
+                    pts_dxf.append((xR, y_top - r_small))
+                    pts_dxf += arc_seg_dxf(xR, y_top, r_small, -90, 90, n=12)[1:]
+                else:      # TRANCHE GAUCHE : face=droite(xR), outer=gauche(xL)
                     pts_dxf.append((xR, y1))
+                    pts_dxf.append((xR, y_bot))
+                    pts_dxf += arc_seg_dxf(x_tc, y_bot, r_big, 0, -180, n=18)[1:]
+                    pts_dxf.append((xL, y_top + r_small))
+                    pts_dxf += arc_seg_dxf(xL, y_top, r_small, 90, 270, n=12)[1:]
                 msp.add_lwpolyline(pts_dxf, dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
