@@ -1651,66 +1651,64 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_outer_x = x_td_1
 
             def _draw_side_finger_pull_curve(x_face, x_outer):
-                # Profil pousse-doigt identique a la reference:
-                #   1) petit demi-cercle horizontal bombe vers le haut,
-                #   2) trait vertical descendant (cote exterieur),
-                #   3) grand demi-cercle horizontal bombe vers le bas,
-                #   4) trait vertical remontant jusqu'en haut (cote face).
-                # Tranche gauche/droite en symetrie miroir.
+                # Gabarit issu de exemple-pousse-doigt.dwg (copie geometrique).
+                # Meme forme sur les deux tranches, en miroir.
                 import math
-                tranche_w = abs(x_outer - x_face)
-                gw = max(6.0, min(groove_depth_req, tranche_w * 0.80))
-                r_big = gw / 2.0
-                r_small = max(2.0, gw * 0.28)
+                # Coordonnees locales (gabarit tranche droite du DWG), mm.
+                # x local: 0 = cote face, 30 = cote exterieur.
+                # y local: 0 = bas du profil, 30.7936 = haut du profil.
+                H_REF = 30.7936074477439
+                W_REF = 30.0
+                template_lines = [
+                    ((0.0, 0.7936074477439), (0.01668216046, 10.9342268458895)),
+                    ((10.02986843417, 0.0), (2.11626485182, 10.9984407028788)),
+                    ((30.0, 30.7936074477439), (23.07688512839, 30.7146316416511)),
+                ]
+                template_arcs = [
+                    (1.08491583019, 10.3633302143081, 1.211216800208252, 31.62499360406803, 151.87859451026, 12),
+                    (15.92508222671, 4.0531600629152, 7.154135318496002, 214.5098467304225, 358.5369002506969, 18),
+                ]
+
                 d = 1.0 if (x_outer > x_face) else -1.0
+                tranche_w = abs(x_outer - x_face)
+                sx = tranche_w / W_REF
+                y_ref_top = W_actual - cOff
+                y_base = y_ref_top - H_REF
 
-                # Positionnement de la gorge proche face, comme la reference.
-                face_offset = max(2.0, min(tranche_w * 0.35, tranche_w - gw - 2.0))
-                if d > 0:  # tranche droite: face a gauche
-                    xL = x_face + face_offset
-                    xR = xL + gw
-                else:      # tranche gauche: face a droite
-                    xR = x_face - face_offset
-                    xL = xR - gw
-                xC = (xL + xR) / 2.0
+                def to_global(pt):
+                    lx, ly = pt
+                    if d > 0:
+                        gx = x_face + lx * sx
+                    else:
+                        gx = x_face - lx * sx
+                    gy = y_base + ly
+                    return gx, gy
 
-                y_top = W_actual - cOff
-                y_bot = max(r_big + 2.0, y_top - groove_drop_req)
-
-                def arc_seg(cx, cy, r, a0_deg, a1_deg, n=18):
+                def arc_pts(cx, cy, r, a0, a1, n=16):
                     pts = []
                     for i in range(n + 1):
-                        t = math.radians(a0_deg + (a1_deg - a0_deg) * i / float(n))
+                        t = math.radians(a0 + (a1 - a0) * i / float(n))
                         pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
                     return pts
 
-                pts = []
-                if d > 0:  # TRANCHE DROITE : petit arc vers la droite
-                    # petit demi-cercle haut (xL -> xR) bombe vers le haut
-                    x_top_end = min(xR, xL + 2.0 * r_small)
-                    x_top_c = (xL + x_top_end) / 2.0
-                    pts += arc_seg(x_top_c, y_top, (x_top_end - xL) / 2.0, 180, 0, n=12)
-                    # vertical exterieur (descend)
-                    pts.append((xR, y_bot))
-                    # grand demi-cercle bas (xR -> xL) bombe vers le bas
-                    pts += arc_seg(xC, y_bot, r_big, 0, -180, n=18)[1:]
-                    # vertical face (remonte jusqu'en haut)
-                    pts.append((xL, W_actual))
-                else:      # TRANCHE GAUCHE : petit arc vers la gauche
-                    x_top_end = max(xL, xR - 2.0 * r_small)
-                    x_top_c = (xR + x_top_end) / 2.0
-                    pts += arc_seg(x_top_c, y_top, (xR - x_top_end) / 2.0, 0, 180, n=12)
-                    pts.append((xL, y_bot))
-                    pts += arc_seg(xC, y_bot, r_big, 180, 360, n=18)[1:]
-                    pts.append((xR, W_actual))
-
-                if needs_rotation:
-                    rot = [rotate_coords(px, py) for (px, py) in pts]
-                    fig.add_trace(go.Scatter(x=[p[0] for p in rot], y=[p[1] for p in rot],
+                # Lignes du gabarit.
+                for p0, p1 in template_lines:
+                    g0 = to_global(p0)
+                    g1 = to_global(p1)
+                    seg = [g0, g1]
+                    if needs_rotation:
+                        seg = [rotate_coords(px, py) for (px, py) in seg]
+                    fig.add_trace(go.Scatter(x=[p[0] for p in seg], y=[p[1] for p in seg],
                                             mode='lines', line=dict(color='black', width=1),
                                             hoverinfo='skip', showlegend=False))
-                else:
-                    fig.add_trace(go.Scatter(x=[p[0] for p in pts], y=[p[1] for p in pts],
+
+                # Arcs du gabarit.
+                for cx, cy, r, a0, a1, n in template_arcs:
+                    pts = arc_pts(cx, cy, r, a0, a1, n)
+                    gpts = [to_global(p) for p in pts]
+                    if needs_rotation:
+                        gpts = [rotate_coords(px, py) for (px, py) in gpts]
+                    fig.add_trace(go.Scatter(x=[p[0] for p in gpts], y=[p[1] for p in gpts],
                                             mode='lines', line=dict(color='black', width=1),
                                             hoverinfo='skip', showlegend=False))
 
