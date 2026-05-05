@@ -1671,16 +1671,17 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
 
                 d = 1.0 if (x_outer > x_face) else -1.0
                 tranche_w = abs(x_outer - x_face)
-                sx = tranche_w / W_REF
-                y_ref_top = W_actual - cOff
-                y_base = y_ref_top - H_REF
+                # Forme verrouillee a l'identique (pas de mise a l'echelle).
+                # Si la tranche differe de 30 mm, on centre simplement le gabarit.
+                x_shift = (tranche_w - W_REF) / 2.0
+                y_base = W_actual - H_REF
 
                 def to_global(pt):
                     lx, ly = pt
                     if d > 0:
-                        gx = x_face + lx * sx
+                        gx = x_face + x_shift + lx
                     else:
-                        gx = x_face - lx * sx
+                        gx = x_face - x_shift - lx
                     gy = y_base + ly
                     return gx, gy
 
