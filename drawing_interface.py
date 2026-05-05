@@ -1651,28 +1651,22 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_outer_x = x_td_1
 
             def _draw_side_finger_pull_curve(x_face, x_outer):
-                # Chemin continu :
-                #   arc haut (bombe vers le HAUT)  --> trait ext (descend)
-                #   --> arc bas (bombe vers le BAS) --> trait face (remonte jusqu'au HAUT)
-                # d > 0 : tranche droite  (x_face < x_outer)
-                # d < 0 : tranche gauche  (x_face > x_outer)
+                # Gorge centrée dans l'épaisseur de la tranche.
+                # Chemin : mur face descend → grand arc BAS → mur ext remonte
+                #           → petit arc bombe vers l'EXTÉRIEUR (gauche ou droite).
+                # d > 0 : tranche droite (x_face < x_outer)
+                # d < 0 : tranche gauche (x_face > x_outer)
                 import math
-                gw = max(6.0, min(groove_depth_req, abs(x_outer - x_face) * 0.80))
-                r  = gw / 2.0
+                gw = max(6.0, min(groove_depth_req, abs(x_outer - x_face) * 0.85))
+                r_big   = gw / 2.0
+                r_small = max(3.0, gw * 0.30)
+                x_tc = (x_face + x_outer) / 2.0   # centre de la tranche
+                xL = x_tc - r_big
+                xR = x_tc + r_big
                 d  = 1.0 if (x_outer > x_face) else -1.0
 
-                # La gorge est positionnée côté face
-                if d > 0:   # TRANCHE DROITE : x_face = gauche
-                    xL = x_face
-                    xR = x_face + gw
-                else:       # TRANCHE GAUCHE : x_face = droite
-                    xR = x_face
-                    xL = x_face - gw
-                xC = (xL + xR) / 2.0
-
-                y_top = W_actual - cOff        # centre arc haut = offset_top sous haut tranche
-                y_bot = max(r + 2.0,
-                            y_top - groove_drop_req)  # centre arc bas
+                y_top = W_actual - cOff
+                y_bot = max(r_big + 2.0, y_top - groove_drop_req)
 
                 def arc_seg(cx, cy, r, a0_deg, a1_deg, n=18):
                     pts = []
@@ -1682,19 +1676,18 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     return pts
 
                 pts = []
-                # Arc haut : de (xL, y_top) → (xR, y_top) via le sommet (bombe vers le HAUT)
-                pts += arc_seg(xC, y_top, r, 180, 0, n=18)
-                # Trait ext : descend du côté EXTÉRIEUR (xR pour droite, xL pour gauche)
-                if d > 0:
-                    pts.append((xR, y_bot))
-                    # Arc bas : de (xR, y_bot) → (xL, y_bot) via le fond (bombe vers le BAS)
-                    pts += arc_seg(xC, y_bot, r, 0, -180, n=18)[1:]
-                    # Trait face : remonte côté FACE (xL) jusqu'au haut de la tranche
-                    pts.append((xL, W_actual))
-                else:
-                    pts.append((xL, y_bot))
-                    pts += arc_seg(xC, y_bot, r, 180, 360, n=18)[1:]
-                    pts.append((xR, W_actual))
+                if d > 0:  # TRANCHE DROITE : face=gauche(xL), outer=droite(xR)
+                    pts.append((xL, W_actual))       # haut mur face
+                    pts.append((xL, y_bot))          # mur face descend
+                    pts += arc_seg(x_tc, y_bot, r_big, 180, 360, n=18)[1:]  # grand arc BAS : xL→xR
+                    pts.append((xR, y_top - r_small))                       # mur ext remonte
+                    pts += arc_seg(xR, y_top, r_small, -90, 90, n=12)[1:]  # petit arc bombe DROITE
+                else:      # TRANCHE GAUCHE : face=droite(xR), outer=gauche(xL)
+                    pts.append((xR, W_actual))       # haut mur face
+                    pts.append((xR, y_bot))          # mur face descend
+                    pts += arc_seg(x_tc, y_bot, r_big, 0, -180, n=18)[1:]  # grand arc BAS : xR→xL
+                    pts.append((xL, y_top + r_small))                       # mur ext remonte
+                    pts += arc_seg(xL, y_top, r_small, 90, 270, n=12)[1:]  # petit arc bombe GAUCHE
 
                 if needs_rotation:
                     rot = [rotate_coords(px, py) for (px, py) in pts]
