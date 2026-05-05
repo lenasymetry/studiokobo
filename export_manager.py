@@ -419,33 +419,26 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
             for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # Forme EXACTE pousse doigt.png : 2 traits + grand demi-cercle fond + petit demi-cercle haut
+                # Chemin continu :
+                #   arc haut (bombe vers le HAUT)  --> trait ext (descend)
+                #   --> arc bas (bombe vers le BAS) --> trait face (remonte jusqu'au HAUT)
                 import math
-                gw = min(groove_depth, abs(tx_outer - tx_face) * 0.80)
-                gw = max(6.0, gw)
-                r_big   = gw / 2.0
-                r_small = max(3.0, gw * 0.38)
-                d = 1.0 if (tx_outer > tx_face) else -1.0
-                if d < 0:   # tranche gauche
-                    x_open = tx_face - gw
-                    x_cap  = tx_face
-                    cap_cx = x_cap - r_small
-                    big_cx = tx_face - r_big
-                    big_a0, big_a1 = 180, 360
-                    cap_a0, cap_a1 =   0, 180
-                else:       # tranche droite
-                    x_open = tx_face + gw
-                    x_cap  = tx_face
-                    cap_cx = x_cap + r_small
-                    big_cx = tx_face + r_big
-                    big_a0, big_a1 =   0, -180
-                    cap_a0, cap_a1 = 180,    0
+                gw = max(6.0, min(groove_depth, abs(tx_outer - tx_face) * 0.80))
+                r  = gw / 2.0
+                d  = 1.0 if (tx_outer > tx_face) else -1.0
 
-                y_big_cy = max(y0 + r_big + 2.0, y1 - groove_drop + r_big)
-                y_cap_cy = max(y_big_cy + r_big + r_small + 4.0,
-                               y1 - groove_drop * 0.28)
+                if d > 0:   # TRANCHE DROITE : tx_face = gauche
+                    xL = tx_face
+                    xR = tx_face + gw
+                else:       # TRANCHE GAUCHE : tx_face = droite
+                    xR = tx_face
+                    xL = tx_face - gw
+                xC = (xL + xR) / 2.0
 
-                def arc_seg_dxf(cx, cy, r, a0_deg, a1_deg, n=16):
+                y_top = y1 - offset_top       # centre arc haut
+                y_bot = max(y0 + r + 2.0, y_top - groove_drop)  # centre arc bas
+
+                def arc_seg_dxf(cx, cy, r, a0_deg, a1_deg, n=18):
                     pts = []
                     for i in range(n + 1):
                         t = math.radians(a0_deg + (a1_deg - a0_deg) * i / float(n))
@@ -453,11 +446,16 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                     return pts
 
                 pts_dxf = []
-                pts_dxf.append((x_open, y1))
-                pts_dxf.append((x_open, y_big_cy))
-                pts_dxf += arc_seg_dxf(big_cx, y_big_cy, r_big, big_a0, big_a1, n=18)[1:]
-                pts_dxf.append((x_cap, y_cap_cy))
-                pts_dxf += arc_seg_dxf(cap_cx, y_cap_cy, r_small, cap_a0, cap_a1, n=12)[1:]
+                # Arc haut : (xL, y_top) → (xR, y_top) via sommet (bombe HAUT)
+                pts_dxf += arc_seg_dxf(xC, y_top, r, 180, 0, n=18)
+                if d > 0:   # tranche droite
+                    pts_dxf.append((xR, y_bot))
+                    pts_dxf += arc_seg_dxf(xC, y_bot, r, 0, -180, n=18)[1:]
+                    pts_dxf.append((xL, y1))
+                else:       # tranche gauche
+                    pts_dxf.append((xL, y_bot))
+                    pts_dxf += arc_seg_dxf(xC, y_bot, r, 180, 360, n=18)[1:]
+                    pts_dxf.append((xR, y1))
                 msp.add_lwpolyline(pts_dxf, dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
