@@ -49,8 +49,8 @@ def _format_dim_value(value):
 def _convert_diameter_string_autocad(diam_str):
     return str(diam_str).replace('⌀', '%%c').replace('Ø', '%%c')
 
-def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=50.0):
-    """Décale les perçages de coulisses des tiroirs ANGLAISE de 50 mm vers l'intérieur."""
+def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=40.0):
+    """Décale les perçages de coulisses des tiroirs ANGLAISE de 40 mm vers l'intérieur."""
     base_positions = [float(x) for x in (x_slide_holes or [])]
     if str(drawer_system) != 'ANGLAISE':
         return base_positions
