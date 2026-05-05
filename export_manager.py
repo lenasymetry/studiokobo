@@ -404,29 +404,31 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
         if cut_type == 'finger_pull':
             # Exigence métier: sur la FACE, afficher uniquement un trait à la hauteur de la découpe.
             offset_top = float(center_cutout_props.get('offset_top', 10.0))
-            y_line = max(y0 + 2.0, min(y1 - 2.0, y1 - offset_top))
+            groove_depth = max(1.0, float(center_cutout_props.get('depth', 12.0)))
+            groove_drop = max(5.0, float(center_cutout_props.get('drop', 35.0)))
+            # Demi-cercle: rayon piloté par profondeur et moitié de la hauteur demandée.
+            arc_radius_base = max(1.0, min(groove_depth, groove_drop / 2.0))
+            # Abaisser la ligne sur la face pour augmenter l'amplitude visuelle.
+            line_lowering = max(4.0, arc_radius_base * 0.8)
+            y_line = max(y0 + 2.0 * arc_radius_base + 1.0, min(y1 - 2.0, y1 - offset_top - line_lowering))
+            arc_radius = max(1.0, min(arc_radius_base, (y_line - y0 - 1.0) / 2.0))
             face_margin = max(5.0, min(25.0, Lp * 0.02))
             msp.add_line((x0 + face_margin, y_line), (x1 - face_margin, y_line), dxfattribs={"layer": "FEUILLURE", "color": 1})
 
-            # Sur les 2 tranches latérales: même profil de passe-doigt.
-            groove_depth = max(1.0, float(center_cutout_props.get('depth', 12.0)))
-            groove_drop = max(5.0, float(center_cutout_props.get('drop', 35.0)))
-            groove_drop = min(groove_drop, max(6.0, y_line - y0 - 2.0))
-            arc_radius = max(1.0, min(groove_depth, groove_drop))
+            # Sur les 2 tranches latérales: demi-cercle + verticale longeant la face.
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
-            for tx_inner, sign in ((tg_x0, -1.0), (td_x0, 1.0)):
-                x_step = tx_inner + sign * groove_depth
-                y_arc_end = y_line - arc_radius
+            for tx_inner, is_left in ((tg_x0, True), (td_x0, False)):
+                y_arc_end = y_line - 2.0 * arc_radius
 
-                # Entrée arrondie (approximation en polyligne) puis segment vertical vers le haut.
+                # Entrée en demi-cercle (approximation en polyligne) puis segment vertical vers le haut.
                 import math
-                cx = x_step
-                cy = y_line
-                if x_step < tx_inner:
-                    theta_start, theta_end = 0.0, -math.pi / 2.0
+                cx = tx_inner
+                cy = y_line - arc_radius
+                if is_left:
+                    theta_start, theta_end = math.pi / 2.0, 3.0 * math.pi / 2.0
                 else:
-                    theta_start, theta_end = math.pi, 3.0 * math.pi / 2.0
+                    theta_start, theta_end = -math.pi / 2.0, math.pi / 2.0
                 n_seg = 12
                 curve_pts = []
                 for i in range(n_seg + 1):
@@ -438,7 +440,7 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                 msp.add_lwpolyline(curve_pts, dxfattribs=profile_layer)
 
                 # Remontée verticale jusqu'au haut de la face pour conserver l'épaisseur demandée.
-                msp.add_line((x_step, y_arc_end), (x_step, y1), dxfattribs=profile_layer)
+                msp.add_line((tx_inner, y_arc_end), (tx_inner, y1), dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
             cW = float(center_cutout_props.get('width', 150.0))
