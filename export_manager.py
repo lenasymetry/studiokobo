@@ -418,29 +418,37 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             # Sur les 2 tranches latérales: demi-cercle + verticale longeant la face.
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
-            for tx_inner, is_left in ((tg_x0, True), (td_x0, False)):
-                y_arc_end = y_line - 2.0 * arc_radius
-
-                # Entrée en demi-cercle (approximation en polyligne) puis segment vertical vers le haut.
+            def _half_round_points_dxf(x_start, x_end, y_base, rise, n_seg=18, upward=True):
                 import math
-                cx = tx_inner
-                cy = y_line - arc_radius
-                if is_left:
-                    theta_start, theta_end = math.pi / 2.0, 3.0 * math.pi / 2.0
-                else:
-                    theta_start, theta_end = -math.pi / 2.0, math.pi / 2.0
-                n_seg = 12
-                curve_pts = []
+                pts = []
                 for i in range(n_seg + 1):
-                    t = i / float(n_seg)
-                    th = theta_start + (theta_end - theta_start) * t
-                    px = cx + arc_radius * math.cos(th)
-                    py = cy + arc_radius * math.sin(th)
-                    curve_pts.append((px, py))
-                msp.add_lwpolyline(curve_pts, dxfattribs=profile_layer)
+                    u = i / float(n_seg)
+                    x = x_start + (x_end - x_start) * u
+                    val = max(0.0, 1.0 - (2.0 * u - 1.0) ** 2)
+                    y_off = float(rise) * math.sqrt(val)
+                    y = y_base + y_off if upward else y_base - y_off
+                    pts.append((x, y))
+                return pts
 
-                # Remontée verticale jusqu'au haut de la face pour conserver l'épaisseur demandée.
-                msp.add_line((tx_inner, y_arc_end), (tx_inner, y1), dxfattribs=profile_layer)
+            for tx_face, inward_sign in ((tg_x0, -1.0), (td_x0, 1.0)):
+                x_stem = tx_face + inward_sign * groove_depth
+                x_join = tx_face + inward_sign * (groove_depth * 0.58)
+
+                y_cap_base = y_line - groove_drop * 0.06
+                y_join = y_line - groove_drop * 0.30
+                y_join = max(y0 + 2.0, min(y_cap_base - 1.0, y_join))
+
+                cap_rise = max(1.0, abs(x_join - x_stem) / 2.0)
+                bowl_rise = max(1.0, groove_drop - (y_line - y_join))
+
+                cap_pts = _half_round_points_dxf(x_stem, x_join, y_cap_base, cap_rise, n_seg=16, upward=True)
+                bowl_pts = _half_round_points_dxf(x_join, tx_face, y_join, bowl_rise, n_seg=22, upward=False)
+                msp.add_lwpolyline(cap_pts, dxfattribs=profile_layer)
+                msp.add_lwpolyline(bowl_pts, dxfattribs=profile_layer)
+
+                msp.add_line((x_stem, y_cap_base), (x_stem, y_join), dxfattribs=profile_layer)
+                msp.add_line((x_join, y_cap_base), (x_join, y_join), dxfattribs=profile_layer)
+                msp.add_line((tx_face, y_join), (tx_face, y1), dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
             cW = float(center_cutout_props.get('width', 150.0))
