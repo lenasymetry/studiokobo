@@ -1627,7 +1627,15 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
         if cutout_type == 'finger_pull':
             # Exigence métier: passe-doigt affiché en face par un seul trait horizontal.
             cOff = float(center_cutout_props.get('offset_top', 10.0))
-            y_line = max(0.0, min(W_actual, W_actual - cOff))
+            groove_depth_req = float(center_cutout_props.get('depth', 12.0))
+            groove_drop_req = float(center_cutout_props.get('drop', 35.0))
+            groove_depth = max(1.0, min(groove_depth_req, max(1.0, TRANCHE_THICK - 1.0)))
+            # Demi-cercle: le rayon suit la profondeur et la moitié de la hauteur demandée.
+            arc_radius_base = max(1.0, min(groove_depth, max(1.0, groove_drop_req / 2.0)))
+            # Abaisser la ligne sur la face pour augmenter l'amplitude visuelle du passe-doigt.
+            line_lowering = max(4.0, arc_radius_base * 0.8)
+            y_line = max(2.0 * arc_radius_base + 1.0, min(W_actual - 1.0, W_actual - cOff - line_lowering))
+            arc_radius = max(1.0, min(arc_radius_base, (y_line - 1.0) / 2.0))
             if needs_rotation:
                 x0_rot, y0_rot = rotate_coords(0.0, y_line)
                 x1_rot, y1_rot = rotate_coords(L_actual, y_line)
@@ -1636,28 +1644,20 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                 fig.add_shape(type="line", x0=0.0, y0=y_line, x1=L_actual, y1=y_line, line=dict(color="black", width=1), layer="above")
 
             # Ajouter aussi la forme de découpe sur les 2 tranches latérales:
-            # entrée arrondie + segment vertical remontant vers le haut de la face.
-            groove_depth_req = float(center_cutout_props.get('depth', 12.0))
-            groove_drop_req = float(center_cutout_props.get('drop', 35.0))
-            groove_depth = max(1.0, min(groove_depth_req, max(1.0, TRANCHE_THICK - 1.0)))
-            groove_drop = max(5.0, min(groove_drop_req, max(6.0, y_line - 2.0)))
-            arc_radius = max(1.0, min(groove_depth, groove_drop))
-
+            # demi-cercle + segment vertical qui remonte jusqu'en haut de la face.
             left_inner_x = x_tg_0
-            left_step_x = x_tg_0 - groove_depth
             right_inner_x = x_td_0
-            right_step_x = x_td_0 + groove_depth
 
-            def _draw_side_finger_pull_curve(x_inner, x_step):
+            def _draw_side_finger_pull_curve(x_inner, bulge_to_left):
                 import math
 
-                # Centre de l'arrondi au niveau de la ligne d'ouverture.
-                cx = x_step
-                cy = y_line
-                if x_step < x_inner:
-                    theta_start, theta_end = 0.0, -math.pi / 2.0
+                # Demi-cercle dont les deux extrémités sont sur la face (x_inner).
+                cx = x_inner
+                cy = y_line - arc_radius
+                if bulge_to_left:
+                    theta_start, theta_end = math.pi / 2.0, 3.0 * math.pi / 2.0
                 else:
-                    theta_start, theta_end = math.pi, 3.0 * math.pi / 2.0
+                    theta_start, theta_end = -math.pi / 2.0, math.pi / 2.0
 
                 n_seg = 14
                 curve_pts = []
@@ -1668,9 +1668,9 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     py = cy + arc_radius * math.sin(th)
                     curve_pts.append((px, py))
 
-                # Segment vertical qui remonte vers le haut de la face.
-                x_vert = x_step
-                y_vert_start = y_line - arc_radius
+                # Segment vertical qui longe la face jusqu'en haut.
+                x_vert = x_inner
+                y_vert_start = y_line - 2.0 * arc_radius
                 y_vert_end = W_actual
 
                 if needs_rotation:
@@ -1701,8 +1701,8 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     )
                     fig.add_shape(type="line", x0=x_vert, y0=y_vert_start, x1=x_vert, y1=y_vert_end, line=dict(color="black", width=1), layer="above")
 
-            _draw_side_finger_pull_curve(left_inner_x, left_step_x)
-            _draw_side_finger_pull_curve(right_inner_x, right_step_x)
+            _draw_side_finger_pull_curve(left_inner_x, bulge_to_left=True)
+            _draw_side_finger_pull_curve(right_inner_x, bulge_to_left=False)
         else:
             cW, cH = center_cutout_props['width'], center_cutout_props['height']
             cOff = center_cutout_props['offset_top']
