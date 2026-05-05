@@ -419,18 +419,18 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
             for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # Gorge en U ouverte par le HAUT (y1), contre le bord face (tx_face).
-                # Le bord extérieur (tx_outer) reste INTACT.
+                # Gorge en U ouverte par le HAUT (y1), contre le bord EXTÉRIEUR (tx_outer).
+                # Le bord face (tx_face) reste intact.
                 import math
                 gw = min(groove_depth, abs(tx_outer - tx_face) * 0.75)
                 gw = max(4.0, gw)
                 d = 1.0 if (tx_outer > tx_face) else -1.0
-                if d > 0:
-                    xL = tx_face
-                    xR = tx_face + gw
-                else:
-                    xL = tx_face - gw
-                    xR = tx_face
+                if d < 0:   # tranche gauche : outer = gauche
+                    xL = tx_outer
+                    xR = tx_outer + gw
+                else:       # tranche droite : outer = droite
+                    xR = tx_outer
+                    xL = tx_outer - gw
                 xC = (xL + xR) / 2.0
                 r_bot = gw / 2.0
                 r_top = max(1.5, gw * 0.18)
