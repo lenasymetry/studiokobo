@@ -419,53 +419,51 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             profile_layer = {"layer": "FEUILLURE", "color": 1}
 
             for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # Profil pousse-doigt identique a la reference:
-                #   1) petit demi-cercle horizontal bombe vers le haut,
-                #   2) trait vertical descendant (cote exterieur),
-                #   3) grand demi-cercle horizontal bombe vers le bas,
-                #   4) trait vertical remontant jusqu'en haut (cote face).
+                # Gabarit issu de exemple-pousse-doigt.dwg (copie geometrique).
+                # Meme forme sur les deux tranches, en miroir.
                 import math
-                tranche_w = abs(tx_outer - tx_face)
-                gw = max(6.0, min(groove_depth, tranche_w * 0.80))
-                r_big = gw / 2.0
-                r_small = max(2.0, gw * 0.28)
+                H_REF = 30.7936074477439
+                W_REF = 30.0
+                template_lines = [
+                    ((0.0, 0.7936074477439), (0.01668216046, 10.9342268458895)),
+                    ((10.02986843417, 0.0), (2.11626485182, 10.9984407028788)),
+                    ((30.0, 30.7936074477439), (23.07688512839, 30.7146316416511)),
+                ]
+                template_arcs = [
+                    (1.08491583019, 10.3633302143081, 1.211216800208252, 31.62499360406803, 151.87859451026, 12),
+                    (15.92508222671, 4.0531600629152, 7.154135318496002, 214.5098467304225, 358.5369002506969, 18),
+                ]
+
                 d = 1.0 if (tx_outer > tx_face) else -1.0
+                tranche_w = abs(tx_outer - tx_face)
+                sx = tranche_w / W_REF
+                y_ref_top = y1 - offset_top
+                y_base = y_ref_top - H_REF
 
-                face_offset = max(2.0, min(tranche_w * 0.35, tranche_w - gw - 2.0))
-                if d > 0:  # tranche droite: face a gauche
-                    xL = tx_face + face_offset
-                    xR = xL + gw
-                else:      # tranche gauche: face a droite
-                    xR = tx_face - face_offset
-                    xL = xR - gw
-                xC = (xL + xR) / 2.0
+                def to_global(pt):
+                    lx, ly = pt
+                    if d > 0:
+                        gx = tx_face + lx * sx
+                    else:
+                        gx = tx_face - lx * sx
+                    gy = y_base + ly
+                    return gx, gy
 
-                y_top = y1 - offset_top
-                y_bot = max(y0 + r_big + 2.0, y_top - groove_drop)
-
-                def arc_seg_dxf(cx, cy, r, a0_deg, a1_deg, n=18):
+                def arc_pts(cx, cy, r, a0, a1, n=16):
                     pts = []
                     for i in range(n + 1):
-                        t = math.radians(a0_deg + (a1_deg - a0_deg) * i / float(n))
+                        t = math.radians(a0 + (a1 - a0) * i / float(n))
                         pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
                     return pts
 
-                pts_dxf = []
-                if d > 0:  # TRANCHE DROITE : petit arc vers la droite
-                    x_top_end = min(xR, xL + 2.0 * r_small)
-                    x_top_c = (xL + x_top_end) / 2.0
-                    pts_dxf += arc_seg_dxf(x_top_c, y_top, (x_top_end - xL) / 2.0, 180, 0, n=12)
-                    pts_dxf.append((xR, y_bot))
-                    pts_dxf += arc_seg_dxf(xC, y_bot, r_big, 0, -180, n=18)[1:]
-                    pts_dxf.append((xL, y1))
-                else:      # TRANCHE GAUCHE : petit arc vers la gauche
-                    x_top_end = max(xL, xR - 2.0 * r_small)
-                    x_top_c = (xR + x_top_end) / 2.0
-                    pts_dxf += arc_seg_dxf(x_top_c, y_top, (xR - x_top_end) / 2.0, 0, 180, n=12)
-                    pts_dxf.append((xL, y_bot))
-                    pts_dxf += arc_seg_dxf(xC, y_bot, r_big, 180, 360, n=18)[1:]
-                    pts_dxf.append((xR, y1))
-                msp.add_lwpolyline(pts_dxf, dxfattribs=profile_layer)
+                for p0, p1 in template_lines:
+                    g0 = to_global(p0)
+                    g1 = to_global(p1)
+                    msp.add_line(g0, g1, dxfattribs=profile_layer)
+
+                for cx, cy, r, a0, a1, n in template_arcs:
+                    pts = [to_global(p) for p in arc_pts(cx, cy, r, a0, a1, n)]
+                    msp.add_lwpolyline(pts, dxfattribs=profile_layer)
         else:
             # Découpe poignée intégrée: rectangle centré sur la façade.
             cW = float(center_cutout_props.get('width', 150.0))
