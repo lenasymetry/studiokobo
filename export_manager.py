@@ -49,8 +49,8 @@ def _format_dim_value(value):
 def _convert_diameter_string_autocad(diam_str):
     return str(diam_str).replace('⌀', '%%c').replace('Ø', '%%c')
 
-def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=40.0):
-    """Décale les perçages de coulisses des tiroirs ANGLAISE de 40 mm vers l'intérieur."""
+def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=50.0):
+    """Décale les perçages de coulisses des tiroirs ANGLAISE de 50 mm vers l'intérieur."""
     base_positions = [float(x) for x in (x_slide_holes or [])]
     if str(drawer_system) != 'ANGLAISE':
         return base_positions
@@ -71,6 +71,16 @@ def _safe_add_text(msp, text, dxfattribs, placement=None, align=None):
     if placement is not None:
         ent.set_placement(placement, align=align)
     return ent
+
+def _get_secondary_divider_title(div_idx, cab_idx, part_label, output_format):
+    """Nom de feuille montant secondaire: sans suffixe caisson en DXF pour onglets stables."""
+    if output_format == 'dxf':
+        return f"Montant Secondaire {div_idx+1} - {part_label}"
+    return f"Montant Secondaire {div_idx+1} (C{cab_idx}) - {part_label}"
+
+def _is_secondary_divider_title(title):
+    txt = str(title or "").lower()
+    return "montant secondaire" in txt and ("1/2" in txt or "2/2" in txt)
 
 def _sanitize_dxf_doc(doc):
     try:
@@ -1048,8 +1058,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                             elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
 
-                            # Tiroir à l'anglaise: perçages décalés de 40 mm pour coller à la visu 3D.
-                            x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
+                    # Tiroir à l'anglaise: perçages décalés de 50 mm depuis le bord.
+                    # (doit être APRÈS tout le calcul des positions, quel que soit le cas de profondeur)
+                    x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
 
                     # Utiliser les LIMITES DE LA ZONE pour détecter les montants adjacents
                     zone_x_min = None
@@ -1369,8 +1380,12 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     
                     # TOUJOURS générer 2 plans (1/2 et 2/2) pour chaque montant secondaire
                     divider_material = div.get('material', cab.get('material_body', 'Matière Corps'))
-                    plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2", div_w, div_h, div_th, c_div_12, divider_element_holes_left[div_idx], div_tranche_holes, [], None, False, divider_material))
-                    plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2", div_w, div_h, div_th, c_div_22, divider_element_holes_right[div_idx], div_tranche_holes, [], None, False, divider_material))
+                    holes_div_left = divider_element_holes_left.get(div_idx, [])
+                    holes_div_right = divider_element_holes_right.get(div_idx, [])
+                    title_12 = _get_secondary_divider_title(div_idx, cab_idx, "1/2", output_format)
+                    title_22 = _get_secondary_divider_title(div_idx, cab_idx, "2/2", output_format)
+                    plans.append((title_12, div_w, div_h, div_th, c_div_12, holes_div_left, div_tranche_holes, [], None, False, divider_material))
+                    plans.append((title_22, div_w, div_h, div_th, c_div_22, holes_div_right, div_tranche_holes, [], None, False, divider_material))
 
             # Garde-fou: forcer les 2 feuilles par montant secondaire même si un traitement amont a sauté.
             if 'vertical_dividers' in cab and cab['vertical_dividers']:
@@ -1384,12 +1399,12 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     c_div_22 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":True, "Chant Droit":False}
                     divider_material = div.get('material', cab.get('material_body', 'Matière Corps'))
 
-                    title_12 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2"
+                    title_12 = _get_secondary_divider_title(div_idx, cab_idx, "1/2", output_format)
                     if title_12 not in existing_plan_titles:
                         plans.append((title_12, div_w, div_h, div_th, c_div_12, divider_element_holes_left.get(div_idx, []), div_tranche_holes, [], None, False, divider_material))
                         existing_plan_titles.add(title_12)
 
-                    title_22 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2"
+                    title_22 = _get_secondary_divider_title(div_idx, cab_idx, "2/2", output_format)
                     if title_22 not in existing_plan_titles:
                         plans.append((title_22, div_w, div_h, div_th, c_div_22, divider_element_holes_right.get(div_idx, []), div_tranche_holes, [], None, False, divider_material))
                         existing_plan_titles.add(title_22)
@@ -1409,7 +1424,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     has_rebate = False
 
                 if not _is_material_allowed(material_name):
-                    continue
+                    # Les montants secondaires doivent toujours apparaître en DXF.
+                    if not (output_format == 'dxf' and _is_secondary_divider_title(title)):
+                        continue
 
                 # Utiliser la quantité spécifique pour ce plan si disponible (tiroirs groupés)
                 proj_for_plan = proj.copy()
@@ -1777,7 +1794,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                 elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
 
-                # Tiroir à l'anglaise: perçages décalés de 40 mm pour coller à la visu 3D.
+                # Tiroir à l'anglaise: perçages décalés de 50 mm depuis le bord.
                 x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
                 
                 zone_x_min = None
