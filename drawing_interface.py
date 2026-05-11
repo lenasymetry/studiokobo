@@ -1335,18 +1335,19 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
     # TOUJOURS dessiner les 4 tranches - OBLIGATOIRES pour toutes les feuilles d'usinage
     draw_tranche([0, L_actual, L_actual, 0, 0], [y_tb_0, y_tb_0, y_tb_1, y_tb_1, y_tb_0], "Chant Avant")
     draw_tranche([0, L_actual, L_actual, 0, 0], [y_th_0, y_th_0, y_th_1, y_th_1, y_th_0], "Chant Arrière")
-    draw_tranche(
-        [x_tg_0, x_tg_1, x_tg_1, x_tg_0, x_tg_0],
-        [0, 0, W_actual, W_actual, 0],
-        "Chant Gauche",
-        allow_hatch=not is_finger_pull_cutout,
-    )
-    draw_tranche(
-        [x_td_0, x_td_1, x_td_1, x_td_0, x_td_0],
-        [0, 0, W_actual, W_actual, 0],
-        "Chant Droit",
-        allow_hatch=not is_finger_pull_cutout,
-    )
+    if not is_finger_pull_cutout:
+        draw_tranche(
+            [x_tg_0, x_tg_1, x_tg_1, x_tg_0, x_tg_0],
+            [0, 0, W_actual, W_actual, 0],
+            "Chant Gauche",
+            allow_hatch=True,
+        )
+        draw_tranche(
+            [x_td_0, x_td_1, x_td_1, x_td_0, x_td_0],
+            [0, 0, W_actual, W_actual, 0],
+            "Chant Droit",
+            allow_hatch=True,
+        )
     
     # Calculer les bounds avec rotation si nécessaire
     if needs_rotation:
@@ -1772,6 +1773,16 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                         pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
                     return pts
 
+                # Contour matiere reel hors zone passe-doigts:
+                # - bord exterieur complet
+                # - bord bas complet
+                # - retour vertical cote face jusqu'au debut du profil
+                base_segments = [
+                    ((W_REF, 0.0), (W_REF, H_REF)),
+                    ((0.0, 0.0), (W_REF, 0.0)),
+                    ((0.0, 0.0), (0.0, 0.7936074477439)),
+                ]
+
                 # Ligne de fermeture manquante: liaison entre l'ouverture arrondie et le haut de tranche.
                 arc2_cx, arc2_cy, arc2_r, _, arc2_a1, _ = template_arcs[1]
                 arc2_end = (
@@ -1779,6 +1790,21 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     arc2_cy + arc2_r * math.sin(math.radians(arc2_a1)),
                 )
                 template_lines.append(((23.07688512839, 30.7146316416511), arc2_end))
+
+                for p0, p1 in base_segments:
+                    g0 = to_global(p0)
+                    g1 = to_global(p1)
+                    seg = [g0, g1]
+                    if needs_rotation:
+                        seg = [rotate_coords(px, py) for (px, py) in seg]
+                    fig.add_trace(go.Scatter(
+                        x=[p[0] for p in seg],
+                        y=[p[1] for p in seg],
+                        mode='lines',
+                        line=dict(color='black', width=1),
+                        hoverinfo='skip',
+                        showlegend=False,
+                    ))
 
                 # Lignes du gabarit.
                 for p0, p1 in template_lines:
