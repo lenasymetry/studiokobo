@@ -435,6 +435,14 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                     (15.92508222671, 4.0531600629152, 7.154135318496002, 214.5098467304225, 358.5369002506969, 18),
                 ]
 
+                # Ligne de fermeture manquante: liaison entre l'ouverture arrondie et le haut de tranche.
+                arc2_cx, arc2_cy, arc2_r, _, arc2_a1, _ = template_arcs[1]
+                arc2_end = (
+                    arc2_cx + arc2_r * math.cos(math.radians(arc2_a1)),
+                    arc2_cy + arc2_r * math.sin(math.radians(arc2_a1)),
+                )
+                template_lines.append(((23.07688512839, 30.7146316416511), arc2_end))
+
                 d = 1.0 if (tx_outer > tx_face) else -1.0
                 tranche_w = abs(tx_outer - tx_face)
                 # Forme verrouillee a l'identique (pas de mise a l'echelle).
