@@ -3305,6 +3305,70 @@ with col2:
                             opacity=(0.35 if is_preview else BODY_OPACITY),
                             showlegend=False
                         ))
+
+            if 'joues' in cab_render and cab_render['joues']:
+                JOUES_COLOR = "#C8A96E"
+                joue_defs = [
+                    ('gauche', 'left'),
+                    ('droite', 'right'),
+                    ('dessus', 'top'),
+                    ('dessous', 'bottom'),
+                ]
+
+                for joue_key, joue_side in joue_defs:
+                    joue = cab_render['joues'].get(joue_key, {}) or {}
+                    if not bool(joue.get('enabled', False)):
+                        continue
+
+                    joue_w_mm = float(joue.get('width', 0.0) or 0.0)
+                    joue_l_mm = float(joue.get('length', 0.0) or 0.0)
+                    joue_t_mm = float(joue.get('thickness', 0.0) or 0.0)
+                    if joue_w_mm <= 0 or joue_l_mm <= 0 or joue_t_mm <= 0:
+                        continue
+
+                    joue_w = joue_w_mm * unit_factor
+                    joue_l = joue_l_mm * unit_factor
+                    joue_t = joue_t_mm * unit_factor
+                    is_preview = bool(joue.get('_preview'))
+                    joue_color = "#666666" if is_preview else JOUES_COLOR
+                    joue_opacity = 0.35 if is_preview else 0.75
+
+                    if joue_side == 'left':
+                        fig3d.add_trace(cuboid_mesh_for(
+                            joue_t, joue_w, joue_l,
+                            (o[0] - joue_t, o[1], o[2]),
+                            color=joue_color,
+                            opacity=joue_opacity,
+                            name=f"Joue gauche {i}",
+                            showlegend=False,
+                        ))
+                    elif joue_side == 'right':
+                        fig3d.add_trace(cuboid_mesh_for(
+                            joue_t, joue_w, joue_l,
+                            (o[0] + L, o[1], o[2]),
+                            color=joue_color,
+                            opacity=joue_opacity,
+                            name=f"Joue droite {i}",
+                            showlegend=False,
+                        ))
+                    elif joue_side == 'top':
+                        fig3d.add_trace(cuboid_mesh_for(
+                            joue_w, joue_l, joue_t,
+                            (o[0], o[1], o[2] + H),
+                            color=joue_color,
+                            opacity=joue_opacity,
+                            name=f"Joue dessus {i}",
+                            showlegend=False,
+                        ))
+                    elif joue_side == 'bottom':
+                        fig3d.add_trace(cuboid_mesh_for(
+                            joue_w, joue_l, joue_t,
+                            (o[0], o[1], o[2] - joue_t),
+                            color=joue_color,
+                            opacity=joue_opacity,
+                            name=f"Joue dessous {i}",
+                            showlegend=False,
+                        ))
             
             # Ajouter les annotations de toutes les zones 2D (après tous les éléments)
             # NE PAS afficher les labels noirs pendant la prévisualisation (seulement les labels bleus des zones existantes)
