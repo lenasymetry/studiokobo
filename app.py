@@ -34,7 +34,7 @@ def resolve_logo_path(filename: str = "logo.png") -> str:
 from utils import calculate_available_space_between_horizontal_shelves
 from geometry_helpers import cuboid_mesh_for, cylinder_mesh_for, add_zone_annotations_to_figure, add_hatched_zones_3d, add_zone_outlines_3d, add_zone_debug_boxes_3d, check_element_placement_validity
 from excel_export import create_styled_excel
-from project_definitions import get_default_dims_19, get_default_door_props_19, get_default_drawer_props_19, get_legrabox_specs
+from project_definitions import get_default_dims_19, get_default_door_props_19, get_default_drawer_props_19, get_legrabox_specs, get_default_joue_props
 from machining_logic import (
     calculate_origins_recursively, get_hinge_y_positions, get_mobile_shelf_holes, 
     calculate_back_panel_holes, detect_collisions, calculate_zones_from_dividers, 
@@ -693,6 +693,33 @@ def calculate_all_project_parts():
                 "Longueur (mm)": plinthe_longueur,
                 "Largeur (mm)": 80.0,
                 "Epaisseur": 19.0,
+                "Chant Avant": False,
+                "Chant Arrière": False,
+                "Chant Gauche": False,
+                "Chant Droit": False,
+                "Usinage": "",
+            })
+
+        # Joues manuelles: présentes dans le débit, jamais dans les exportations AutoCAD.
+        joues = cabinet.get('joues', {}) or {}
+        for joue_key, joue_label in [
+            ('gauche', 'Joue gauche'),
+            ('droite', 'Joue droite'),
+            ('dessus', 'Joue dessus'),
+            ('dessous', 'Joue dessous'),
+        ]:
+            joue = joues.get(joue_key, get_default_joue_props())
+            if not bool(joue.get('enabled', False)):
+                continue
+            all_parts.append({
+                "Lettre": f"C{i}-J{joue_key[:1].upper()}",
+                "Référence Pièce": f"{joue_label} (C{i})",
+                "Matière": str(joue.get('material', 'Matière Corps')),
+                "Caisson": f"C{i}",
+                "Qté": 1,
+                "Longueur (mm)": float(joue.get('length', 0.0) or 0.0),
+                "Largeur (mm)": float(joue.get('width', 0.0) or 0.0),
+                "Epaisseur": float(joue.get('thickness', 0.0) or 0.0),
                 "Chant Avant": False,
                 "Chant Arrière": False,
                 "Chant Gauche": False,
@@ -1460,6 +1487,64 @@ with col1:
                         d_p['fileur_width'] = fileur_choice
                     else:
                         d_p['fileur_width'] = 0
+
+                    st.markdown("#### Joues")
+                    joues = d_p.setdefault('joues', {
+                        'gauche': get_default_joue_props(),
+                        'droite': get_default_joue_props(),
+                        'dessus': get_default_joue_props(),
+                        'dessous': get_default_joue_props(),
+                    })
+
+                    for joue_key, joue_label in [
+                        ('gauche', 'Joue gauche'),
+                        ('droite', 'Joue droite'),
+                        ('dessus', 'Joue dessus'),
+                        ('dessous', 'Joue dessous'),
+                    ]:
+                        joue = joues.setdefault(joue_key, get_default_joue_props())
+                        st.markdown(f"##### {joue_label}")
+                        enabled = st.checkbox(
+                            f"Activer {joue_label.lower()}",
+                            value=bool(joue.get('enabled', False)),
+                            key=f"joue_enabled_{joue_key}_{idx}"
+                        )
+                        joue['enabled'] = enabled
+                        if enabled:
+                            cols = st.columns(4)
+                            with cols[0]:
+                                joue['width'] = st.number_input(
+                                    "Largeur du panneau (mm)",
+                                    value=float(joue.get('width', 0.0) or 0.0),
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.0f",
+                                    key=f"joue_width_{joue_key}_{idx}"
+                                )
+                            with cols[1]:
+                                joue['length'] = st.number_input(
+                                    "Longueur du panneau (mm)",
+                                    value=float(joue.get('length', 0.0) or 0.0),
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.0f",
+                                    key=f"joue_length_{joue_key}_{idx}"
+                                )
+                            with cols[2]:
+                                joue['thickness'] = st.number_input(
+                                    "Épaisseur du panneau (mm)",
+                                    value=float(joue.get('thickness', 0.0) or 0.0),
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.0f",
+                                    key=f"joue_thickness_{joue_key}_{idx}"
+                                )
+                            with cols[3]:
+                                joue['material'] = st.text_input(
+                                    "Matière",
+                                    value=str(joue.get('material', 'Matière Corps')),
+                                    key=f"joue_material_{joue_key}_{idx}"
+                                )
 
                     st.markdown("#### Configuration des Tiroirs")
                     st.button("➕ Ajouter un Tiroir", key=f"add_drawer_{idx}", on_click=add_drawer_callback)
