@@ -6,7 +6,7 @@ import openpyxl
 import json
 import datetime
 import copy
-from project_definitions import get_default_dims_19, get_default_door_props_19, get_default_drawer_props_19, get_default_drawer_props, get_default_vertical_divider_props, get_default_vertical_shelf_props
+from project_definitions import get_default_dims_19, get_default_door_props_19, get_default_drawer_props_19, get_default_drawer_props, get_default_vertical_divider_props, get_default_vertical_shelf_props, get_default_joue_props
 
 # Fonctions de compatibilité pour les valeurs par défaut
 def get_default_debit_data():
@@ -402,7 +402,13 @@ def add_cabinet(origin_type='central'):
             'parent_index': None, 'attachment_dir': None, 'door_props': get_default_door_props_19(),
             'drawer_props': get_default_drawer_props_19(), 'drawers': [], 'shelves': [], 'material_body': 'Matière Corps',
             'vertical_dividers': [],  # Nouveaux montants verticaux secondaires
-            'vertical_shelves': []  # Étagères verticales
+            'vertical_shelves': [],  # Étagères verticales
+            'joues': {
+                'gauche': get_default_joue_props(),
+                'droite': get_default_joue_props(),
+                'dessus': get_default_joue_props(),
+                'dessous': get_default_joue_props(),
+            }
         }
         st.session_state['scene_cabinets'].append(new_cabinet)
         st.session_state['selected_cabinet_index'] = 0
@@ -418,7 +424,13 @@ def add_cabinet(origin_type='central'):
             'parent_index': base_index, 'attachment_dir': origin_type, 'door_props': get_default_door_props_19(),
             'drawer_props': get_default_drawer_props_19(), 'drawers': [], 'shelves': [], 'material_body': 'Matière Corps',
             'vertical_dividers': [],  # Nouveaux montants verticaux secondaires
-            'vertical_shelves': []  # Étagères verticales
+            'vertical_shelves': [],  # Étagères verticales
+            'joues': {
+                'gauche': get_default_joue_props(),
+                'droite': get_default_joue_props(),
+                'dessus': get_default_joue_props(),
+                'dessous': get_default_joue_props(),
+            }
         }
         if origin_type == 'right': new_name = f"D de {base_index}"
         elif origin_type == 'left': new_name = f"G de {base_index}"
