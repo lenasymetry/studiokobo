@@ -1214,15 +1214,84 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
     # La zone colorée VERTICALE pour les montants sera dessinée plus bas,
     # une fois que l'on connaît la position de la deuxième colonne de trous.
     
-    def draw_tranche(tx, ty, hatch_key):
+    def draw_tranche(tx, ty, hatch_key, allow_hatch=True):
         # Transformer les coordonnées si rotation nécessaire
         if needs_rotation:
             tx_rot, ty_rot = zip(*[rotate_coords(x, y) for x, y in zip(tx, ty)])
             tx, ty = list(tx_rot), list(ty_rot)
         fig.add_trace(go.Scatter(x=tx, y=ty, fill="toself", fillcolor="#f9f9f9", line=dict(color=line_color, width=1), hoverinfo="none", showlegend=False, mode='lines'))
-        if chants.get(hatch_key):
+        if allow_hatch and chants.get(hatch_key):
             hx, hy = create_hatch_lines(min(tx), min(ty), max(tx), max(ty), density=HATCH_SPACING)
             fig.add_trace(go.Scatter(x=hx, y=hy, mode='lines', line=dict(color=HATCH_COLOR, width=1), hoverinfo='skip', showlegend=False))
+
+    def _point_in_polygon(px, py, polygon):
+        inside = False
+        n = len(polygon)
+        if n < 3:
+            return False
+        for i in range(n):
+            x1, y1 = polygon[i]
+            x2, y2 = polygon[(i + 1) % n]
+            intersects = ((y1 > py) != (y2 > py))
+            if intersects:
+                x_at_y = (x2 - x1) * (py - y1) / ((y2 - y1) + 1e-12) + x1
+                if px < x_at_y:
+                    inside = not inside
+        return inside
+
+    def _clip_hatch_segment_outside_polygon(p0, p1, polygon, samples=100):
+        x0s, y0s = p0
+        x1s, y1s = p1
+        pts = []
+        for i in range(samples + 1):
+            t = i / float(samples)
+            pts.append((x0s + (x1s - x0s) * t, y0s + (y1s - y0s) * t))
+
+        segments = []
+        run_start = None
+        for i, (px, py) in enumerate(pts):
+            in_hole = _point_in_polygon(px, py, polygon)
+            keep = not in_hole
+            if keep and run_start is None:
+                run_start = i
+            elif (not keep) and run_start is not None:
+                if i - run_start >= 1:
+                    segments.append((pts[run_start], pts[i - 1]))
+                run_start = None
+        if run_start is not None and samples - run_start >= 1:
+            segments.append((pts[run_start], pts[-1]))
+        return segments
+
+    def _add_hatch_for_rect_with_hole(rect_x0, rect_y0, rect_x1, rect_y1, hole_polygon):
+        hx_raw, hy_raw = create_hatch_lines(rect_x0, rect_y0, rect_x1, rect_y1, density=HATCH_SPACING)
+        hatch_x, hatch_y = [], []
+        current = []
+        for x, y in zip(hx_raw, hy_raw):
+            if x is None or y is None:
+                if len(current) == 2:
+                    clipped = _clip_hatch_segment_outside_polygon(current[0], current[1], hole_polygon)
+                    for c0, c1 in clipped:
+                        p0, p1 = c0, c1
+                        if needs_rotation:
+                            p0 = rotate_coords(p0[0], p0[1])
+                            p1 = rotate_coords(p1[0], p1[1])
+                        hatch_x.extend([p0[0], p1[0], None])
+                        hatch_y.extend([p0[1], p1[1], None])
+                current = []
+            else:
+                current.append((x, y))
+
+        if hatch_x and hatch_y:
+            fig.add_trace(go.Scatter(
+                x=hatch_x,
+                y=hatch_y,
+                mode='lines',
+                line=dict(color=HATCH_COLOR, width=1),
+                hoverinfo='skip',
+                showlegend=False,
+            ))
+
+    is_finger_pull_cutout = bool(center_cutout_props) and str(center_cutout_props.get('type', 'integrated_cutout')) == 'finger_pull'
 
     # ===== LES 4 TRANCHES SONT OBLIGATOIRES SUR TOUTES LES FEUILLES D'USINAGE =====
     # Calculer les positions des tranches (avec rotation si nécessaire)
@@ -1266,8 +1335,18 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
     # TOUJOURS dessiner les 4 tranches - OBLIGATOIRES pour toutes les feuilles d'usinage
     draw_tranche([0, L_actual, L_actual, 0, 0], [y_tb_0, y_tb_0, y_tb_1, y_tb_1, y_tb_0], "Chant Avant")
     draw_tranche([0, L_actual, L_actual, 0, 0], [y_th_0, y_th_0, y_th_1, y_th_1, y_th_0], "Chant Arrière")
-    draw_tranche([x_tg_0, x_tg_1, x_tg_1, x_tg_0, x_tg_0], [0, 0, W_actual, W_actual, 0], "Chant Gauche")
-    draw_tranche([x_td_0, x_td_1, x_td_1, x_td_0, x_td_0], [0, 0, W_actual, W_actual, 0], "Chant Droit")
+    draw_tranche(
+        [x_tg_0, x_tg_1, x_tg_1, x_tg_0, x_tg_0],
+        [0, 0, W_actual, W_actual, 0],
+        "Chant Gauche",
+        allow_hatch=not is_finger_pull_cutout,
+    )
+    draw_tranche(
+        [x_td_0, x_td_1, x_td_1, x_td_0, x_td_0],
+        [0, 0, W_actual, W_actual, 0],
+        "Chant Droit",
+        allow_hatch=not is_finger_pull_cutout,
+    )
     
     # Calculer les bounds avec rotation si nécessaire
     if needs_rotation:
@@ -1650,7 +1729,7 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
             right_inner_x = x_td_0
             right_outer_x = x_td_1
 
-            def _draw_side_finger_pull_curve(x_face, x_outer):
+            def _draw_side_finger_pull_curve(x_face, x_outer, side_hatch_key):
                 # Gabarit issu de exemple-pousse-doigt.dwg (copie geometrique).
                 # Meme forme sur les deux tranches, en miroir.
                 import math
@@ -1677,24 +1756,6 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                 x_shift = (tranche_w - W_REF) / 2.0
                 y_base = W_actual - H_REF
 
-                # Fond blanc sur la zone du profil pour masquer les hachures de chant.
-                x_min_fill = min(x_face, x_outer)
-                x_max_fill = max(x_face, x_outer)
-                fill_rect = [
-                    (x_min_fill, max(y_base, 0.0)),
-                    (x_max_fill, max(y_base, 0.0)),
-                    (x_max_fill, W_actual),
-                    (x_min_fill, W_actual),
-                    (x_min_fill, max(y_base, 0.0)),
-                ]
-                if needs_rotation:
-                    fill_rect = [rotate_coords(px, py) for (px, py) in fill_rect]
-                fig.add_trace(go.Scatter(
-                    x=[p[0] for p in fill_rect], y=[p[1] for p in fill_rect],
-                    fill='toself', fillcolor='white',
-                    line=dict(color='white', width=0),
-                    hoverinfo='skip', showlegend=False))
-
                 def to_global(pt):
                     lx, ly = pt
                     if d > 0:
@@ -1710,6 +1771,14 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                         t = math.radians(a0 + (a1 - a0) * i / float(n))
                         pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
                     return pts
+
+                # Ligne de fermeture manquante: liaison entre l'ouverture arrondie et le haut de tranche.
+                arc2_cx, arc2_cy, arc2_r, _, arc2_a1, _ = template_arcs[1]
+                arc2_end = (
+                    arc2_cx + arc2_r * math.cos(math.radians(arc2_a1)),
+                    arc2_cy + arc2_r * math.sin(math.radians(arc2_a1)),
+                )
+                template_lines.append(((23.07688512839, 30.7146316416511), arc2_end))
 
                 # Lignes du gabarit.
                 for p0, p1 in template_lines:
@@ -1732,8 +1801,29 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                                             mode='lines', line=dict(color='black', width=1),
                                             hoverinfo='skip', showlegend=False))
 
-            _draw_side_finger_pull_curve(left_inner_x, left_outer_x)
-            _draw_side_finger_pull_curve(right_inner_x, right_outer_x)
+                # Recalcul des hachures de tranche: uniquement dans la matiere,
+                # en excluant la poche passe-doigts via un contour ferme.
+                if chants.get(side_hatch_key):
+                    arc1_pts = arc_pts(*template_arcs[0][:5], n=24)
+                    arc2_pts = arc_pts(*template_arcs[1][:5], n=24)
+                    hole_local = [
+                        (0.0, H_REF),
+                        (W_REF, H_REF),
+                        (23.07688512839, 30.7146316416511),
+                        arc2_end,
+                    ] + list(reversed(arc2_pts)) + [
+                        (2.11626485182, 10.9984407028788),
+                    ] + list(arc1_pts) + [
+                        (0.01668216046, 10.9342268458895),
+                    ]
+
+                    hole_global = [to_global((px, py)) for (px, py) in hole_local]
+                    rect_x0 = min(x_face, x_outer)
+                    rect_x1 = max(x_face, x_outer)
+                    _add_hatch_for_rect_with_hole(rect_x0, 0.0, rect_x1, W_actual, hole_global)
+
+            _draw_side_finger_pull_curve(left_inner_x, left_outer_x, "Chant Gauche")
+            _draw_side_finger_pull_curve(right_inner_x, right_outer_x, "Chant Droit")
         else:
             cW, cH = center_cutout_props['width'], center_cutout_props['height']
             cOff = center_cutout_props['offset_top']
