@@ -63,6 +63,16 @@ def get_default_vertical_shelf_props():
         'material': 'Matière Corps'
     }
 
+def get_default_joue_props():
+    """Retourne les propriétés par défaut pour une joue manuelle."""
+    return {
+        'enabled': False,
+        'width': 0.0,
+        'length': 0.0,
+        'thickness': 0.0,
+        'material': 'Matière Corps',
+    }
+
 def get_legrabox_specs():
     """Retourne les spécifications pour le système LÉGRABOX (N, M, K, C)."""
     return {
