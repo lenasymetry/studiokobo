@@ -1555,7 +1555,7 @@ with col1:
                             options=_system_opts,
                             index=system_idx,
                             key=f"pending_drawer_system_{idx}",
-                            help="ANGLAISE : tiroir posé 40mm à l'intérieur, face centrée dans la zone"
+                            help="ANGLAISE : tiroir posé 30mm à l'intérieur, face centrée dans la zone"
                         )
                         
                         # Sélection du type selon le système
@@ -1819,7 +1819,7 @@ with col1:
                                     index=system_idx,
                                     key=f"drawer_system_{idx}_{i}",
                                     on_change=lambda x=i: update_drawer_prop(x, 'drawer_system'),
-                                    help="ANGLAISE : tiroir posé 40mm à l'intérieur, face centrée dans la zone"
+                                    help="ANGLAISE : tiroir posé 30mm à l'intérieur, face centrée dans la zone"
                                 )
                                 
                                 # Sélection du type selon le système
@@ -3059,9 +3059,9 @@ with col2:
                         is_applique = bool(drp.get('_applique_mode', False))
                         
                         if drawer_system == 'ANGLAISE':
-                            # TIROIR À L'ANGLAISE : face posée 40mm à l'intérieur du caisson
+                            # TIROIR À L'ANGLAISE : face posée 30mm à l'intérieur du caisson
                             # Largeur face = largeur zone - 4mm (2mm de jeu de chaque côté)
-                            anglaise_inset_depth = 40.0 * unit_factor
+                            anglaise_inset_depth = 30.0 * unit_factor
                             anglaise_side_gap = 2.0 * unit_factor
                             dW_zone = max(0.0, zone_width_abs - 2.0 * anglaise_side_gap)
                             drawer_x_start = zone_x_min_abs + anglaise_side_gap
@@ -3120,8 +3120,8 @@ with col2:
                         drawer_z_pos = o[2] + (drp.get('drawer_bottom_offset', 0.0) * unit_factor)
                         
                         if drawer_system == 'ANGLAISE':
-                            # TIROIR À L'ANGLAISE : 40mm inside, 2mm de jeu latéral de chaque côté
-                            anglaise_inset_depth = 40.0 * unit_factor
+                            # TIROIR À L'ANGLAISE : 30mm inside, 2mm de jeu latéral de chaque côté
+                            anglaise_inset_depth = 30.0 * unit_factor
                             anglaise_side_gap = 2.0 * unit_factor
                             dW_zone = max(0.0, L - 2.0 * anglaise_side_gap)
                             drawer_x_start = o[0] + anglaise_side_gap
@@ -3636,3 +3636,4 @@ with col2:
                 disabled=True,
                 key="scene_metrics_edge_without_detail",
             )
+            
