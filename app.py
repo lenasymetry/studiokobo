@@ -704,6 +704,32 @@ def calculate_all_project_parts():
         if 'joues' not in cabinet and isinstance(cabinet.get('door_props', {}).get('joues'), dict):
             cabinet['joues'] = copy.deepcopy(cabinet['door_props']['joues'])
         joues = cabinet.get('joues', {}) or {}
+        joue_chants = {
+            'droite': {
+                'Chant Avant': True,
+                'Chant Arrière': True,
+                'Chant Gauche': False,
+                'Chant Droit': True,
+            },
+            'gauche': {
+                'Chant Avant': True,
+                'Chant Arrière': True,
+                'Chant Gauche': True,
+                'Chant Droit': False,
+            },
+            'dessous': {
+                'Chant Avant': True,
+                'Chant Arrière': True,
+                'Chant Gauche': False,
+                'Chant Droit': True,
+            },
+            'dessus': {
+                'Chant Avant': True,
+                'Chant Arrière': True,
+                'Chant Gauche': True,
+                'Chant Droit': False,
+            },
+        }
         for joue_key, joue_label in [
             ('gauche', 'Joue gauche'),
             ('droite', 'Joue droite'),
@@ -713,6 +739,12 @@ def calculate_all_project_parts():
             joue = joues.get(joue_key, get_default_joue_props())
             if not bool(joue.get('enabled', False)):
                 continue
+            chants = joue_chants.get(joue_key, {
+                'Chant Avant': False,
+                'Chant Arrière': False,
+                'Chant Gauche': False,
+                'Chant Droit': False,
+            })
             all_parts.append({
                 "Lettre": f"C{i}-J{joue_key[:1].upper()}",
                 "Référence Pièce": f"{joue_label} (C{i})",
@@ -722,10 +754,10 @@ def calculate_all_project_parts():
                 "Longueur (mm)": float(joue.get('length', 0.0) or 0.0),
                 "Largeur (mm)": float(joue.get('width', 0.0) or 0.0),
                 "Epaisseur": float(joue.get('thickness', 0.0) or 0.0),
-                "Chant Avant": False,
-                "Chant Arrière": False,
-                "Chant Gauche": False,
-                "Chant Droit": False,
+                "Chant Avant": chants['Chant Avant'],
+                "Chant Arrière": chants['Chant Arrière'],
+                "Chant Gauche": chants['Chant Gauche'],
+                "Chant Droit": chants['Chant Droit'],
                 "Usinage": "",
             })
         
@@ -3636,4 +3668,3 @@ with col2:
                 disabled=True,
                 key="scene_metrics_edge_without_detail",
             )
-            
