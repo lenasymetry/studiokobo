@@ -701,6 +701,8 @@ def calculate_all_project_parts():
             })
 
         # Joues manuelles: présentes dans le débit, jamais dans les exportations AutoCAD.
+        if 'joues' not in cabinet and isinstance(cabinet.get('door_props', {}).get('joues'), dict):
+            cabinet['joues'] = copy.deepcopy(cabinet['door_props']['joues'])
         joues = cabinet.get('joues', {}) or {}
         for joue_key, joue_label in [
             ('gauche', 'Joue gauche'),
@@ -1347,7 +1349,7 @@ with col1:
             
             if selected_cab:
                 idx = st.session_state.selected_cabinet_index
-                t_dims, t_acc, t_sh, t_div, t_deb = st.tabs(["Dimensions", "Porte/Tiroir", "Étagères", "Montants Secondaires", "Feuille de Débit"])
+                t_dims, t_acc, t_sh, t_div, t_joues, t_deb = st.tabs(["Dimensions", "Porte/Tiroir", "Étagères", "Montants Secondaires", "Joues", "Feuille de Débit"])
                 with t_dims:
                     st.markdown(f"#### Matières et Dimensions du Corps")
                     st.text_input(f"Matière Corps", value=selected_cab.get('material_body', 'Matière Corps'), key=f"material_body_{idx}", on_change=lambda: update_selected_cabinet_material('material_body'))
@@ -1488,67 +1490,10 @@ with col1:
                     else:
                         d_p['fileur_width'] = 0
 
-                    st.markdown("#### Joues")
-                    joues = d_p.setdefault('joues', {
-                        'gauche': get_default_joue_props(),
-                        'droite': get_default_joue_props(),
-                        'dessus': get_default_joue_props(),
-                        'dessous': get_default_joue_props(),
-                    })
-
-                    for joue_key, joue_label in [
-                        ('gauche', 'Joue gauche'),
-                        ('droite', 'Joue droite'),
-                        ('dessus', 'Joue dessus'),
-                        ('dessous', 'Joue dessous'),
-                    ]:
-                        joue = joues.setdefault(joue_key, get_default_joue_props())
-                        st.markdown(f"##### {joue_label}")
-                        enabled = st.checkbox(
-                            f"Activer {joue_label.lower()}",
-                            value=bool(joue.get('enabled', False)),
-                            key=f"joue_enabled_{joue_key}_{idx}"
-                        )
-                        joue['enabled'] = enabled
-                        if enabled:
-                            cols = st.columns(4)
-                            with cols[0]:
-                                joue['width'] = st.number_input(
-                                    "Largeur du panneau (mm)",
-                                    value=float(joue.get('width', 0.0) or 0.0),
-                                    min_value=0.0,
-                                    step=1.0,
-                                    format="%.0f",
-                                    key=f"joue_width_{joue_key}_{idx}"
-                                )
-                            with cols[1]:
-                                joue['length'] = st.number_input(
-                                    "Longueur du panneau (mm)",
-                                    value=float(joue.get('length', 0.0) or 0.0),
-                                    min_value=0.0,
-                                    step=1.0,
-                                    format="%.0f",
-                                    key=f"joue_length_{joue_key}_{idx}"
-                                )
-                            with cols[2]:
-                                joue['thickness'] = st.number_input(
-                                    "Épaisseur du panneau (mm)",
-                                    value=float(joue.get('thickness', 0.0) or 0.0),
-                                    min_value=0.0,
-                                    step=1.0,
-                                    format="%.0f",
-                                    key=f"joue_thickness_{joue_key}_{idx}"
-                                )
-                            with cols[3]:
-                                joue['material'] = st.text_input(
-                                    "Matière",
-                                    value=str(joue.get('material', 'Matière Corps')),
-                                    key=f"joue_material_{joue_key}_{idx}"
-                                )
-
                     st.markdown("#### Configuration des Tiroirs")
                     st.button("➕ Ajouter un Tiroir", key=f"add_drawer_{idx}", on_click=add_drawer_callback)
                     st.button("🧱 Ajouter plusieurs tiroirs (empiler)", key=f"add_drawers_stack_{idx}", on_click=add_drawers_stack_callback)
+
                     
                     # --- POSE EN 2 TEMPS (APERÇU -> VALIDER) : TIROIR ---
                     pending = st.session_state.get('pending_placement')
@@ -2011,6 +1956,70 @@ with col1:
                                     on_change=lambda x=i: update_drawer_prop(x, 'material_inner')
                                 )
                                 st.button("Supprimer ce tiroir 🗑️", key=f"del_drawer_{idx}_{i}", on_click=lambda x=i: delete_drawer_callback(x))
+
+                with t_joues:
+                    st.markdown("#### Joues")
+                    # Migration douce: anciennes versions stockaient les joues dans door_props.
+                    legacy_joues = d_p.get('joues') if isinstance(d_p, dict) else None
+                    if 'joues' not in selected_cab and isinstance(legacy_joues, dict):
+                        selected_cab['joues'] = copy.deepcopy(legacy_joues)
+
+                    joues = selected_cab.setdefault('joues', {
+                        'gauche': get_default_joue_props(),
+                        'droite': get_default_joue_props(),
+                        'dessus': get_default_joue_props(),
+                        'dessous': get_default_joue_props(),
+                    })
+
+                    for joue_key, joue_label in [
+                        ('gauche', 'Joue gauche'),
+                        ('droite', 'Joue droite'),
+                        ('dessus', 'Joue dessus'),
+                        ('dessous', 'Joue dessous'),
+                    ]:
+                        joue = joues.setdefault(joue_key, get_default_joue_props())
+                        st.markdown(f"##### {joue_label}")
+                        enabled = st.checkbox(
+                            f"Activer {joue_label.lower()}",
+                            value=bool(joue.get('enabled', False)),
+                            key=f"joue_enabled_{joue_key}_{idx}"
+                        )
+                        joue['enabled'] = enabled
+                        if enabled:
+                            cols = st.columns(4)
+                            with cols[0]:
+                                joue['width'] = st.number_input(
+                                    "Largeur du panneau (mm)",
+                                    value=float(joue.get('width', 0.0) or 0.0),
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.0f",
+                                    key=f"joue_width_{joue_key}_{idx}"
+                                )
+                            with cols[1]:
+                                joue['length'] = st.number_input(
+                                    "Longueur du panneau (mm)",
+                                    value=float(joue.get('length', 0.0) or 0.0),
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.0f",
+                                    key=f"joue_length_{joue_key}_{idx}"
+                                )
+                            with cols[2]:
+                                joue['thickness'] = st.number_input(
+                                    "Épaisseur du panneau (mm)",
+                                    value=float(joue.get('thickness', 0.0) or 0.0),
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.0f",
+                                    key=f"joue_thickness_{joue_key}_{idx}"
+                                )
+                            with cols[3]:
+                                joue['material'] = st.text_input(
+                                    "Matière",
+                                    value=str(joue.get('material', 'Matière Corps')),
+                                    key=f"joue_material_{joue_key}_{idx}"
+                                )
 
                 with t_sh:
                     st.markdown("#### Configuration des Étagères")
