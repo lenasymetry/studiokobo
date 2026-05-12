@@ -49,8 +49,8 @@ def _format_dim_value(value):
 def _convert_diameter_string_autocad(diam_str):
     return str(diam_str).replace('⌀', '%%c').replace('Ø', '%%c')
 
-def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=40.0):
-    """Décale les perçages de coulisses des tiroirs ANGLAISE de 40 mm vers l'intérieur."""
+def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=30.0):
+    """Décale les perçages de coulisses des tiroirs ANGLAISE de 30 mm vers l'intérieur."""
     base_positions = [float(x) for x in (x_slide_holes or [])]
     if str(drawer_system) != 'ANGLAISE':
         return base_positions
@@ -1265,7 +1265,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                             elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
 
-                    # Tiroir à l'anglaise: perçages décalés de 40 mm depuis le bord.
+                    # Tiroir à l'anglaise: perçages décalés de 30 mm depuis le bord.
                     # (doit être APRÈS tout le calcul des positions, quel que soit le cas de profondeur)
                     x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
 
@@ -2028,7 +2028,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                 elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
 
-                # Tiroir à l'anglaise: perçages décalés de 40 mm depuis le bord.
+                # Tiroir à l'anglaise: perçages décalés de 30 mm depuis le bord.
                 x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
                 
                 zone_x_min = None
