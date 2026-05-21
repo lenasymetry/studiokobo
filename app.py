@@ -537,6 +537,10 @@ def get_automatic_edge_banding(part_name):
     elif "traverse" in name: return True, True, False, False
     else: return True, True, True, True
 
+
+def is_plinthe_reference(ref_value):
+    return "plinthe" in str(ref_value).lower()
+
 def has_holes_for_piece(ref_key, cabinet, piece_data=None):
     """
     Vérifie si une pièce a des trous sur sa feuille d'usinage.
@@ -693,7 +697,7 @@ def calculate_all_project_parts():
                 "Longueur (mm)": plinthe_longueur,
                 "Largeur (mm)": 80.0,
                 "Epaisseur": 19.0,
-                "Chant Avant": False,
+                "Chant Avant": True,
                 "Chant Arrière": False,
                 "Chant Gauche": False,
                 "Chant Droit": False,
@@ -2700,6 +2704,8 @@ with col1:
                     for row_idx, row in df.iterrows():
                         ref = str(row.get("Référence Pièce", ""))
                         ref_key = ref.split(" (")[0].strip()
+                        if is_plinthe_reference(ref):
+                            df.at[row_idx, "Chant Avant"] = True
                         if "Etagère" in ref_key or "Étagère" in ref_key:
                             # Règle demandée : étagères fixes et mobiles = dimensions traverses.
                             df.at[row_idx, "Longueur (mm)"] = L_traverse
@@ -2736,6 +2742,10 @@ with col1:
                         },
                         num_rows="dynamic"
                     )
+
+                    if "Référence Pièce" in edited_df.columns and "Chant Avant" in edited_df.columns:
+                        plinthe_mask = edited_df["Référence Pièce"].astype(str).str.lower().str.contains("plinthe", na=False)
+                        edited_df.loc[plinthe_mask, "Chant Avant"] = True
                     
                     # Écrire les modifications dans l'état du caisson
                     st.session_state['scene_cabinets'][idx]['debit_data'] = edited_df.to_dict(orient="records")
@@ -3541,6 +3551,9 @@ with col2:
         for chant_col in ["Chant Avant", "Chant Arrière", "Chant Gauche", "Chant Droit"]:
             if chant_col not in df_debit.columns:
                 df_debit[chant_col] = False
+        if "Référence Pièce" in df_debit.columns and "Chant Avant" in df_debit.columns:
+            plinthe_mask = df_debit["Référence Pièce"].astype(str).str.lower().str.contains("plinthe", na=False)
+            df_debit.loc[plinthe_mask, "Chant Avant"] = True
         preferred_cols = [
             "Lettre", "Référence Pièce", "Matière", "Caisson", "Qté",
             "Longueur (mm)", "Largeur (mm)", "Epaisseur",
@@ -3614,7 +3627,10 @@ with col2:
                 ]:
                     _total_edge_mm = _edge_mm * _qte
                     _meters = _total_edge_mm / 1000
-                    if bool(_part.get(_chant_key, False)):
+                    _has_chant = bool(_part.get(_chant_key, False))
+                    if _chant_key == "Chant Avant" and is_plinthe_reference(_ref):
+                        _has_chant = True
+                    if _has_chant:
                         edge_with_count += _qte
                         edge_with_total_mm += _total_edge_mm
                         linear_avec_chant += _meters
