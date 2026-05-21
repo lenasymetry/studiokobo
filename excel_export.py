@@ -29,6 +29,14 @@ def create_styled_excel(project_info_dict, df_all_parts, save_data_dict=None):
     font_title_main = Font(name='Arial', size=16, bold=True, underline='single')
 
     df_export = df_all_parts.copy()
+
+    # Sécurité export: les plinthes doivent toujours avoir le chant avant.
+    if "Référence Pièce" in df_export.columns:
+        plinthe_mask = df_export["Référence Pièce"].astype(str).str.lower().str.contains("plinthe", na=False)
+        if "Chant Avant" not in df_export.columns:
+            df_export["Chant Avant"] = False
+        df_export.loc[plinthe_mask, "Chant Avant"] = True
+
     chant_cols = ["Chant Avant", "Chant Arrière", "Chant Gauche", "Chant Droit"]
     for col in chant_cols:
         if col in df_export.columns:
