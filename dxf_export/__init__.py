@@ -88,7 +88,9 @@ def _build_parts_from_project(project_data) -> List[PartSpec]:
             cabinets_to_process=cabinets_data,
             indices_to_process=indices,
             output_format="figures",
-            selected_materials=project_data.get("selected_materials"),
+            # Le DXF doit toujours contenir toutes les feuilles d'usinage.
+            # Le filtrage matière reste réservé aux exports tabulaires (ex: Excel).
+            selected_materials=None,
         )
         if not figs_ok:
             figs = []
