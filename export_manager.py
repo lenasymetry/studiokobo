@@ -597,15 +597,11 @@ def _compute_door_hinge_y_positions(door_height, door_props):
     return get_hinge_y_positions(door_height)
 
 
-def _build_door_face_holes(door_width, hinge_y_positions, hinge_side, extra_outer_offset=0.0):
-    """Build cup + screw holes for a door leaf.
-
-    extra_outer_offset is applied from the hinged outer edge,
-    i.e. new offset = existing offset + extra_outer_offset.
-    """
+def _build_door_face_holes(door_width, hinge_y_positions, hinge_side):
+    """Build cup + screw holes for a door leaf."""
     door_width = float(door_width)
-    edge_cup_offset = 23.5 + float(extra_outer_offset or 0.0)
-    edge_screw_offset = 33.0 + float(extra_outer_offset or 0.0)
+    edge_cup_offset = 23.5
+    edge_screw_offset = 33.0
 
     if hinge_side == 'left':
         cup_x = edge_cup_offset
@@ -620,6 +616,38 @@ def _build_door_face_holes(door_width, hinge_y_positions, hinge_side, extra_oute
         holes.append({'type': 'vis', 'x': screw_x, 'y': y + 22.5, 'diam_str': "⌀8"})
         holes.append({'type': 'vis', 'x': screw_x, 'y': y - 22.5, 'diam_str': "⌀8"})
     return holes
+
+
+def _redistribute_hinge_y_positions_with_edge_offset(hinge_y_positions, door_height, edge, extra_offset_mm=80.0):
+    """Apply extra edge offset to one extreme hinge and redistribute evenly.
+
+    edge='min': offset from lower edge (y=0) is increased by extra_offset_mm.
+    edge='max': offset from upper edge (y=door_height) is increased by extra_offset_mm.
+    """
+    ys = sorted(float(y) for y in (hinge_y_positions or []))
+    n = len(ys)
+    if n == 0:
+        return ys
+
+    if n == 1:
+        if edge == 'min':
+            return [min(float(door_height), ys[0] + float(extra_offset_mm))]
+        return [max(0.0, ys[0] - float(extra_offset_mm))]
+
+    y_min = ys[0]
+    y_max = ys[-1]
+    extra = float(extra_offset_mm)
+
+    if edge == 'min':
+        new_min = min(y_max - 1.0, y_min + extra)
+        span = y_max - new_min
+        step = span / float(n - 1)
+        return [new_min + (i * step) for i in range(n)]
+
+    new_max = max(y_min + 1.0, y_max - extra)
+    span = new_max - y_min
+    step = span / float(n - 1)
+    return [y_min + (i * step) for i in range(n)]
 
 def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_format='html'):
     """
@@ -1294,16 +1322,19 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
 
                     if dp.get('door_model') == 'floor_length':
                         # Double + cache-pieds: two distinct mirrored variants.
-                        # Required rule: new offset = existing offset + 80 mm on the outer hinged side.
+                        # Required rule: new offset = existing offset + 80 mm on one edge,
+                        # then redistribute all hinge center positions uniformly.
                         c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
 
                         title_left = f"Porte (C{cab_idx}) - Variante Gauche"
-                        holes_p_left = _build_door_face_holes(dW_half, y_h, hinge_side='left', extra_outer_offset=80.0)
+                        y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=80.0)
+                        holes_p_left = _build_door_face_holes(dW_half, y_h_left, hinge_side='left')
                         plans.append((title_left, dW_half, dH, dp['door_thickness'], c_p, holes_p_left, [], [], None))
                         plan_quantities[title_left] = 1
 
                         title_right = f"Porte (C{cab_idx}) - Variante Droite"
-                        holes_p_right = _build_door_face_holes(dW_half, y_h, hinge_side='right', extra_outer_offset=80.0)
+                        y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
+                        holes_p_right = _build_door_face_holes(dW_half, y_h_right, hinge_side='right')
                         plans.append((title_right, dW_half, dH, dp['door_thickness'], c_p, holes_p_right, [], [], None))
                         plan_quantities[title_right] = 1
                     else:
@@ -1988,7 +2019,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                     c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
 
                     title_left = f"Porte (C{cab_idx}) - Variante Gauche"
-                    holes_left = _build_door_face_holes(dW, y_h, hinge_side='left', extra_outer_offset=80.0)
+                    y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=80.0)
+                    holes_left = _build_door_face_holes(dW, y_h_left, hinge_side='left')
                     fig_left = draw_machining_view_pro_final(
                         title_left, dW, dH, dp.get('door_thickness', 19.0),
                         st.session_state.unit_select, proj, c_fa, holes_left, [], [], None, False
@@ -1996,7 +2028,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                     all_figures.append((title_left, fig_left))
 
                     title_right = f"Porte (C{cab_idx}) - Variante Droite"
-                    holes_right = _build_door_face_holes(dW, y_h, hinge_side='right', extra_outer_offset=80.0)
+                    y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
+                    holes_right = _build_door_face_holes(dW, y_h_right, hinge_side='right')
                     fig_right = draw_machining_view_pro_final(
                         title_right, dW, dH, dp.get('door_thickness', 19.0),
                         st.session_state.unit_select, proj, c_fa, holes_right, [], [], None, False
