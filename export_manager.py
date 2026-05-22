@@ -118,6 +118,13 @@ def _get_secondary_divider_title(div_idx, cab_idx, part_label, output_format):
         return f"Montant Secondaire {div_idx+1} (C{cab_idx}) - {part_label}"
     return f"Montant Secondaire {div_idx+1} (C{cab_idx}) - {part_label}"
 
+def _get_door_plan_title(cab_idx, door_opening=None, door_model='standard', output_format='html'):
+    title = f"Porte (C{cab_idx})"
+    if door_model == 'floor_length' and output_format in {'dxf', 'figures'} and door_opening in {'left', 'right'}:
+        side_label = 'Gauche' if door_opening == 'left' else 'Droite'
+        return f"Porte {side_label} (C{cab_idx})"
+    return title
+
 def _is_secondary_divider_title(title):
     txt = str(title or "").lower()
     return "montant secondaire" in txt and ("1/2" in txt or "2/2" in txt)
@@ -1523,6 +1530,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             if cab['door_props']['has_door']:
                 dp = cab['door_props']
                 door_type = dp.get('door_type', 'single')
+                door_model = dp.get('door_model', 'standard')
                 dH = H_raw + 80.0 - dp['door_gap'] if dp.get('door_model')=='floor_length' else H_raw - (2 * dp['door_gap'])
                 hinge_base_h = max(1.0, dH - 80.0) if dp.get('door_model') == 'floor_length' else dH
                 hinge_y_offset = 80.0 if dp.get('door_model') == 'floor_length' else 0.0
@@ -1554,7 +1562,17 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         holes_p_d.append({'type':'tourillon','x':xc_d,'y':y,'diam_str':"⌀35"})
                         holes_p_d.append({'type':'vis','x':xv_d,'y':y+22.5,'diam_str':"⌀8"})
                         holes_p_d.append({'type':'vis','x':xv_d,'y':y-22.5,'diam_str':"⌀8"})
-                    
+
+                    c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
+                    if door_model == 'floor_length' and output_format in {'dxf', 'figures'}:
+                        left_title = _get_door_plan_title(cab_idx, 'left', door_model, output_format)
+                        right_title = _get_door_plan_title(cab_idx, 'right', door_model, output_format)
+                        plan_quantities[left_title] = 1
+                        plan_quantities[right_title] = 1
+                        plans.append((left_title, dW_half, dH, dp['door_thickness'], c_p, holes_p_g, [], [], None, False, dp.get('material', 'Matière Porte')))
+                        plans.append((right_title, dW_half, dH, dp['door_thickness'], c_p, holes_p_d, [], [], None, False, dp.get('material', 'Matière Porte')))
+                        continue
+
                     # Utiliser holes_p_g pour la feuille d'usinage (les deux battants sont identiques)
                     holes_p = holes_p_g
                     dW = dW_half
@@ -1579,9 +1597,10 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     door_quantity = 1
                 
                 c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
+                door_title = _get_door_plan_title(cab_idx, dp.get('door_opening'), door_model, output_format)
                 # Stocker la quantité pour la porte dans plan_quantities
-                plan_quantities[f"Porte (C{cab_idx})"] = door_quantity
-                plans.append((f"Porte (C{cab_idx})", dW, dH, dp['door_thickness'], c_p, holes_p, [], [], None, False, dp.get('material', 'Matière Porte')))
+                plan_quantities[door_title] = door_quantity
+                plans.append((door_title, dW, dH, dp['door_thickness'], c_p, holes_p, [], [], None, False, dp.get('material', 'Matière Porte')))
             
             # --- MONTANTS SECONDAIRES (MÊME LOGIQUE QUE 2.PY) ---
             if 'vertical_dividers' in cab and cab['vertical_dividers']:
@@ -2475,18 +2494,45 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 y_h = get_hinge_y_positions(hinge_base_h)
             y_h = [y + hinge_y_offset for y in y_h]
 
-            holes_p = []
             door_type = dp.get('door_type', 'single')
+            door_model = dp.get('door_model', 'standard')
+            c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
+
             if door_type == 'double':
                 dW = (L_raw - (2 * dp['door_gap'])) / 2.0
-                xc = 23.5
-                xv = 33.0
+
+                holes_p_left = []
                 for y in y_h:
-                    holes_p.append({'type': 'tourillon', 'x': xc, 'y': y, 'diam_str': "⌀35"})
-                    holes_p.append({'type': 'vis', 'x': xv, 'y': y + 22.5, 'diam_str': "⌀8"})
-                    holes_p.append({'type': 'vis', 'x': xv, 'y': y - 22.5, 'diam_str': "⌀8"})
+                    holes_p_left.append({'type': 'tourillon', 'x': 23.5, 'y': y, 'diam_str': "⌀35"})
+                    holes_p_left.append({'type': 'vis', 'x': 33.0, 'y': y + 22.5, 'diam_str': "⌀8"})
+                    holes_p_left.append({'type': 'vis', 'x': 33.0, 'y': y - 22.5, 'diam_str': "⌀8"})
+
+                if door_model == 'floor_length':
+                    holes_p_right = []
+                    right_cup_x = dW - 23.5
+                    right_screw_x = dW - 33.0
+                    for y in y_h:
+                        holes_p_right.append({'type': 'tourillon', 'x': right_cup_x, 'y': y, 'diam_str': "⌀35"})
+                        holes_p_right.append({'type': 'vis', 'x': right_screw_x, 'y': y + 22.5, 'diam_str': "⌀8"})
+                        holes_p_right.append({'type': 'vis', 'x': right_screw_x, 'y': y - 22.5, 'diam_str': "⌀8"})
+
+                    for opening, holes_p in (('left', holes_p_left), ('right', holes_p_right)):
+                        door_title = _get_door_plan_title(cab_idx, opening, door_model, 'figures')
+                        fig_door = draw_machining_view_pro_final(
+                            door_title, dW, dH, dp.get('door_thickness', 19.0),
+                            st.session_state.unit_select, proj, c_fa, holes_p, [], [], None, False
+                        )
+                        _append_figure(door_title, fig_door, holes_p)
+                else:
+                    door_title = _get_door_plan_title(cab_idx, None, door_model, 'figures')
+                    fig_door = draw_machining_view_pro_final(
+                        door_title, dW, dH, dp.get('door_thickness', 19.0),
+                        st.session_state.unit_select, proj, c_fa, holes_p_left, [], [], None, False
+                    )
+                    _append_figure(door_title, fig_door, holes_p_left)
             else:
                 dW = L_raw - (2 * dp['door_gap'])
+                holes_p = []
                 xc = 23.5 if dp.get('door_opening') == 'left' else dW - 23.5
                 xv = 33.0 if dp.get('door_opening') == 'left' else dW - 33.0
                 for y in y_h:
@@ -2494,12 +2540,12 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     holes_p.append({'type': 'vis', 'x': xv, 'y': y + 22.5, 'diam_str': "⌀8"})
                     holes_p.append({'type': 'vis', 'x': xv, 'y': y - 22.5, 'diam_str': "⌀8"})
 
-            c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
-            fig_door = draw_machining_view_pro_final(
-                f"Porte (C{cab_idx})", dW, dH, dp.get('door_thickness', 19.0),
-                st.session_state.unit_select, proj, c_fa, holes_p, [], [], None, False
-            )
-            _append_figure(f"Porte (C{cab_idx})", fig_door, holes_p)
+                door_title = _get_door_plan_title(cab_idx, dp.get('door_opening'), door_model, 'figures')
+                fig_door = draw_machining_view_pro_final(
+                    door_title, dW, dH, dp.get('door_thickness', 19.0),
+                    st.session_state.unit_select, proj, c_fa, holes_p, [], [], None, False
+                )
+                _append_figure(door_title, fig_door, holes_p)
 
     if include_hole_counts:
         return all_figures, hole_counts
