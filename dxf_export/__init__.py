@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 import io
-import re
 from dataclasses import dataclass
 from typing import List
 
@@ -88,23 +87,12 @@ def _build_parts_from_project(project_data) -> List[PartSpec]:
             cabinets_to_process=cabinets_data,
             indices_to_process=indices,
             output_format="figures",
-            # Le DXF doit toujours contenir toutes les feuilles d'usinage.
-            # Le filtrage matière reste réservé aux exports tabulaires (ex: Excel).
-            selected_materials=None,
         )
         if not figs_ok:
             figs = []
 
-        seen_ids: dict = {}
         for n, (title, fig) in enumerate(figs, start=1):
-            base_id = sanitize_table_name(str(title or f"ELEMENT_{n:02d}"), fallback=f"ELEMENT_{n:02d}", max_len=28)
-            if base_id not in seen_ids:
-                seen_ids[base_id] = 0
-                element_id = base_id
-            else:
-                seen_ids[base_id] += 1
-                suffix = f"_{seen_ids[base_id]:02d}"
-                element_id = base_id[: 31 - len(suffix)] + suffix
+            element_id = sanitize_table_name(str(title or f"ELEMENT_{n:02d}"), fallback=f"ELEMENT_{n:02d}", max_len=31)
             fig_meta = getattr(getattr(fig, "layout", None), "meta", None) or {}
             qty = 1
             try:
@@ -121,31 +109,11 @@ def _build_parts_from_project(project_data) -> List[PartSpec]:
                 "version": project_data.get("version", "V1"),
                 "date": datetime.date.today().isoformat(),
             }
-            # Propage les meta de la figure (cabinet_index/corps_meuble, etc.)
-            # vers la feuille DXF pour que le cartouche soit correct sur TOUTES les pieces.
-            if isinstance(fig_meta, dict):
-                for key, value in fig_meta.items():
-                    if key in {"dxf_dimensions", "dxf_triangles"}:
-                        continue
-                    if key == "quantity":
-                        continue
-                    sheet[key] = value
             scene = build_sheet_scene(sheet)
             scene.meta.update(sheet)
             _convert_text_entities_to_ascii(scene)
             _ensure_dimension_entities(scene)
-            parts.append(
-                PartSpec(
-                    element_id=element_id,
-                    scene=scene,
-                    metadata={
-                        "part_name": title,
-                        "quantity": qty,
-                        "cabinet_index": fig_meta.get("cabinet_index") if isinstance(fig_meta, dict) else None,
-                        "corps_meuble": fig_meta.get("corps_meuble") if isinstance(fig_meta, dict) else None,
-                    },
-                )
-            )
+            parts.append(PartSpec(element_id=element_id, scene=scene, metadata={"part_name": title, "quantity": qty}))
         if parts:
             return parts
     except Exception:
@@ -229,83 +197,9 @@ def _merge_sheet_metadata(project_data, scene: Scene, layout_name: str, element_
     md.setdefault("client", project_data.get("client", ""))
     md.setdefault("comments", project_data.get("comments", ""))
     md.setdefault("quantity", part_meta.get("quantity", 1) if isinstance(part_meta, dict) else 1)
-    # Cartouche DXF: afficher le caisson source de CHAQUE feuille.
-    # Priorite a l'index explicite injecte dans les meta de figure.
-    cab_idx = md.get("cabinet_index", None)
-    try:
-        if cab_idx is not None:
-            md["corps_meuble"] = f"Caisson {int(cab_idx)}"
-        else:
-            source_text = " ".join(
-                str(v)
-                for v in (
-                    md.get("part_name", ""),
-                    md.get("title", ""),
-                    md.get("reference", ""),
-                    element_id,
-                )
-                if v
-            )
-            caisson_match = re.search(r"\(\s*C\s*(\d+)\s*\)", source_text, flags=re.IGNORECASE)
-            if not caisson_match:
-                caisson_match = re.search(r"\bC\s*(\d+)\b", source_text, flags=re.IGNORECASE)
-
-            if caisson_match:
-                md["corps_meuble"] = f"Caisson {int(caisson_match.group(1))}"
-            else:
-                md.setdefault("corps_meuble", project_data.get("corps_meuble", "caisson"))
-    except Exception:
-        md.setdefault("corps_meuble", project_data.get("corps_meuble", "caisson"))
+    md.setdefault("corps_meuble", project_data.get("corps_meuble", "caisson"))
     md["element_id"] = element_id
     return md
-
-
-def _add_presentation_cover_layout(doc, project_data, config, titleblock_height: float, total_sheets: int, logs: list) -> bool:
-    if not bool(project_data.get("presentation_cover_enabled", True)):
-        return False
-
-    layout_name = _layout_name(1)
-    layout, viewport, zone_info = setup_layout_with_viewport_excluding_titleblock(
-        doc,
-        layout_name=layout_name,
-        paper_width_mm=config.paper_width_mm,
-        paper_height_mm=config.paper_height_mm,
-        margin_mm=config.page_margin_mm,
-        titleblock_height_mm=titleblock_height,
-    )
-
-    # La feuille de présentation n'utilise pas le viewport ModelSpace.
-    try:
-        layout.delete_entity(viewport)
-    except Exception:
-        pass
-
-    draw_zone = (zone_info or {}).get("draw_zone", {})
-    cx = float(draw_zone.get("left", 0.0)) + float(draw_zone.get("width", config.paper_width_mm)) * 0.5
-    cy = float(draw_zone.get("bottom", 0.0)) + float(draw_zone.get("height", config.paper_height_mm)) * 0.5
-
-    try:
-        from ezdxf.enums import TextEntityAlignment
-    except Exception:
-        TextEntityAlignment = None
-
-    t1 = layout.add_text(
-        sanitize_text("PLANS D'USINAGES", fallback="PLANS D'USINAGES"),
-        dxfattribs={"layer": "TEXT", "height": 16.0, "style": "Standard", "color": 7},
-    )
-    t2 = layout.add_text(
-        sanitize_text(str(project_data.get("presentation_cover_title", project_data.get("project_name", "")) or ""), fallback=""),
-        dxfattribs={"layer": "TEXT", "height": 9.0, "style": "Standard", "color": 7},
-    )
-    if TextEntityAlignment:
-        t1.set_placement((cx, cy + 8.0), align=TextEntityAlignment.MIDDLE_CENTER)
-        t2.set_placement((cx, cy - 8.0), align=TextEntityAlignment.MIDDLE_CENTER)
-    else:
-        t1.set_placement((cx, cy + 8.0))
-        t2.set_placement((cx, cy - 8.0))
-
-    logs.append(f"LAYOUT_OK[{layout_name}] presentation_cover=text_only")
-    return True
 
 
 def export_project_to_dxf(project_data, mode="editable", force_primitives_dims=False, debug=False, debug_stage="all") -> ExportResult:
@@ -344,22 +238,10 @@ def export_project_to_dxf(project_data, mode="editable", force_primitives_dims=F
         global_max_x = None
         global_max_y = None
 
-        has_presentation_cover = bool(project_data.get("presentation_cover_enabled", True))
-        total_sheets = len(sheets) + (1 if has_presentation_cover else 0)
-
-        if has_presentation_cover:
-            _add_presentation_cover_layout(
-                doc,
-                project_data=project_data,
-                config=config,
-                titleblock_height=titleblock_height,
-                total_sheets=total_sheets,
-                logs=logs,
-            )
+        total_sheets = len(sheets)
 
         for i, sheet in enumerate(sheets, start=1):
-            sheet_number = i + (1 if has_presentation_cover else 0)
-            layout_name = _layout_name(sheet_number)
+            layout_name = _layout_name(i)
             scene = sheet.scene
 
             bbox, geom_bbox = render_scene_to_modelspace(
@@ -391,7 +273,7 @@ def export_project_to_dxf(project_data, mode="editable", force_primitives_dims=F
             metadata = _merge_sheet_metadata(project_data, scene, layout_name, sheet.element_id, sheet.metadata)
             metadata["view_center"] = vp_info.get("view_center")
             metadata["view_height"] = vp_info.get("view_height")
-            metadata["sheet_index"] = sheet_number
+            metadata["sheet_index"] = i
             metadata["total_sheets"] = total_sheets
 
             # Calcul automatique de l'echelle: zone papier / hauteur modele
