@@ -49,58 +49,6 @@ def _format_dim_value(value):
 def _convert_diameter_string_autocad(diam_str):
     return str(diam_str).replace('⌀', '%%c').replace('Ø', '%%c')
 
-def _apply_anglaise_slide_offset(drawer_system, x_slide_holes, panel_depth_mm, inset_mm=30.0):
-    """Décale les perçages de coulisses des tiroirs ANGLAISE de 30 mm vers l'intérieur."""
-    base_positions = [float(x) for x in (x_slide_holes or [])]
-    if str(drawer_system) != 'ANGLAISE':
-        return base_positions
-
-    max_pos = max(0.0, float(panel_depth_mm) - 1.0)
-    shifted = [x + float(inset_mm) for x in base_positions]
-    filtered = [x for x in shifted if 0.0 <= x <= max_pos]
-    # Fallback: ne jamais renvoyer une liste vide pour éviter de perdre la feuille d'usinage.
-    return filtered if filtered else ([max_pos] if max_pos > 0.0 else [])
-
-def _drawer_handle_signature(drp):
-    """Retourne une signature hashable de poignée tiroir pour le regroupement des plans."""
-    handle_type = str(drp.get('drawer_handle_type', 'none'))
-    if handle_type == 'integrated_cutout':
-        return (
-            'integrated_cutout',
-            float(drp.get('drawer_handle_width', 150.0)),
-            float(drp.get('drawer_handle_height', 40.0)),
-            float(drp.get('drawer_handle_offset_top', 10.0)),
-        )
-    if handle_type == 'finger_pull':
-        return (
-            'finger_pull',
-            float(drp.get('drawer_handle_offset_top', 10.0)),
-            float(drp.get('drawer_finger_pull_depth', 12.0)),
-            float(drp.get('drawer_finger_pull_drop', 35.0)),
-        )
-    return None
-
-def _handle_signature_to_cutout_props(signature):
-    """Convertit une signature de poignée tiroir en dict de paramètres de dessin."""
-    if not signature:
-        return None
-    sig_type = str(signature[0])
-    if sig_type == 'integrated_cutout':
-        return {
-            'type': 'integrated_cutout',
-            'width': float(signature[1]),
-            'height': float(signature[2]),
-            'offset_top': float(signature[3]),
-        }
-    if sig_type == 'finger_pull':
-        return {
-            'type': 'finger_pull',
-            'offset_top': float(signature[1]),
-            'depth': float(signature[2]),
-            'drop': float(signature[3]),
-        }
-    return None
-
 def _safe_add_text(msp, text, dxfattribs, placement=None, align=None):
     if text is None:
         return None
@@ -111,23 +59,6 @@ def _safe_add_text(msp, text, dxfattribs, placement=None, align=None):
     if placement is not None:
         ent.set_placement(placement, align=align)
     return ent
-
-def _get_secondary_divider_title(div_idx, cab_idx, part_label, output_format):
-    """Nom de feuille montant secondaire, unique par caisson et partie."""
-    if output_format == 'dxf':
-        return f"Montant Secondaire {div_idx+1} (C{cab_idx}) - {part_label}"
-    return f"Montant Secondaire {div_idx+1} (C{cab_idx}) - {part_label}"
-
-def _get_door_plan_title(cab_idx, door_opening=None, door_model='standard', output_format='html'):
-    title = f"Porte (C{cab_idx})"
-    if door_model == 'floor_length' and output_format in {'dxf', 'figures'} and door_opening in {'left', 'right'}:
-        side_label = 'Gauche' if door_opening == 'left' else 'Droite'
-        return f"Porte {side_label} (C{cab_idx})"
-    return title
-
-def _is_secondary_divider_title(title):
-    txt = str(title or "").lower()
-    return "montant secondaire" in txt and ("1/2" in txt or "2/2" in txt)
 
 def _sanitize_dxf_doc(doc):
     try:
@@ -151,65 +82,6 @@ def _sanitize_dxf_doc(doc):
             msp.delete_entity(ent)
         except Exception:
             pass
-
-def _sanitize_layout_name(raw_name, fallback="SHEET"):
-    import re
-    base = re.sub(r"[^A-Za-z0-9_\- ]+", "", str(raw_name or "")).strip()
-    base = re.sub(r"\s+", "_", base)
-    base = base.strip("_")
-    return (base or fallback)[:31]
-
-def _sheet_layout_name(index):
-    """Nom de layout déterministe, unique et sans limite pratique de nombre de feuilles."""
-    return f"SHEET_{int(index):04d}"
-
-def _fit_view_height_for_bbox(bbox, viewport_w, viewport_h, margin_factor=1.08):
-    min_x, min_y, max_x, max_y = bbox
-    bw = max(1.0, float(max_x) - float(min_x))
-    bh = max(1.0, float(max_y) - float(min_y))
-    vp_ratio = max(1e-6, float(viewport_w) / float(viewport_h))
-    bbox_ratio = bw / bh
-
-    if bbox_ratio > vp_ratio:
-        # Contenu plus large que le viewport: hauteur pilotée par la largeur.
-        return max(10.0, (bw / vp_ratio) * float(margin_factor))
-    return max(10.0, bh * float(margin_factor))
-
-def _create_layout_for_plan(doc, layout_name, bbox, paper_w=420.0, paper_h=297.0, margin=10.0):
-    if layout_name in doc.layouts:
-        layout = doc.layouts.get(layout_name)
-    else:
-        layout = doc.layouts.new(layout_name)
-
-    try:
-        layout.page_setup(size=(float(paper_w), float(paper_h)), margins=(float(margin),) * 4, units="mm")
-    except Exception:
-        pass
-
-    # Recrée un viewport unique par feuille.
-    for vp in list(layout.query("VIEWPORT")):
-        try:
-            layout.delete_entity(vp)
-        except Exception:
-            pass
-
-    vp_center = (float(paper_w) / 2.0, float(paper_h) / 2.0)
-    vp_size = (
-        max(1.0, float(paper_w) - 2.0 * float(margin)),
-        max(1.0, float(paper_h) - 2.0 * float(margin)),
-    )
-
-    min_x, min_y, max_x, max_y = bbox
-    model_center = ((float(min_x) + float(max_x)) / 2.0, (float(min_y) + float(max_y)) / 2.0)
-    view_height = _fit_view_height_for_bbox(bbox, vp_size[0], vp_size[1])
-
-    layout.add_viewport(
-        center=vp_center,
-        size=vp_size,
-        view_center_point=model_center,
-        view_height=view_height,
-        status=2,
-    )
 
 def _add_linear_dimension_dxf(msp, base, p1, p2, angle, layer="COTES", text_override=None, dimstyle="COTATIONS_PRO"):
     """Ajoute une vraie dimension AutoCAD éditable avec l'outil COTE."""
@@ -348,7 +220,7 @@ def _add_tranche_dxf(msp, x_coords, y_coords, Tp, layer="TRANCHES"):
     poly_pts.append(poly_pts[0])
     msp.add_lwpolyline(poly_pts, dxfattribs={"layer": layer})
 
-def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_plan, origin_x=0.0, origin_y=0.0, ch=None, has_rebate=False, center_cutout_props=None):
+def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_plan, origin_x=0.0, origin_y=0.0, ch=None, has_rebate=False):
     Lp = float(Lp)
     Wp = float(Wp)
     Tp = float(Tp)
@@ -404,97 +276,6 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
 
     _add_linear_dimension_dxf(msp, base=(x1 + 80.0, tb_y0), p1=(x1, tb_y0), p2=(x1, tb_y1), angle=90, layer="COTES")
     _add_linear_dimension_dxf(msp, base=(tg_x0, y1 + 80.0), p1=(tg_x0, y1), p2=(tg_x1, y1), angle=0, layer="COTES")
-
-    # Usinage poignée sur façade tiroir.
-    if center_cutout_props:
-        cut_type = str(center_cutout_props.get('type', 'integrated_cutout'))
-        if cut_type == 'finger_pull':
-            # Exigence métier: sur la FACE, afficher uniquement un trait à la hauteur de la découpe.
-            offset_top = float(center_cutout_props.get('offset_top', 10.0))
-            groove_depth = max(1.0, float(center_cutout_props.get('depth', 12.0)))
-            groove_drop = max(5.0, float(center_cutout_props.get('drop', 35.0)))
-            # Demi-cercle: rayon piloté par profondeur et moitié de la hauteur demandée.
-            arc_radius_base = max(1.0, min(groove_depth, groove_drop / 2.0))
-            # Abaisser la ligne sur la face pour augmenter l'amplitude visuelle.
-            line_lowering = max(4.0, arc_radius_base * 0.8)
-            y_line = max(y0 + 2.0 * arc_radius_base + 1.0, min(y1 - 2.0, y1 - offset_top - line_lowering))
-            arc_radius = max(1.0, min(arc_radius_base, (y_line - y0 - 1.0) / 2.0))
-            face_margin = max(5.0, min(25.0, Lp * 0.02))
-            msp.add_line((x0 + face_margin, y_line), (x1 - face_margin, y_line), dxfattribs={"layer": "FEUILLURE", "color": 1})
-
-            # Sur les 2 tranches latérales: demi-cercle + verticale longeant la face.
-            profile_layer = {"layer": "FEUILLURE", "color": 1}
-
-            for tx_face, tx_outer in ((tg_x0, tg_x1), (td_x0, td_x1)):
-                # Gabarit issu de exemple-pousse-doigt.dwg (copie geometrique).
-                # Meme forme sur les deux tranches, en miroir.
-                import math
-                H_REF = 30.7936074477439
-                W_REF = 30.0
-                template_lines = [
-                    ((0.0, 0.7936074477439), (0.01668216046, 10.9342268458895)),
-                    ((10.02986843417, 0.0), (2.11626485182, 10.9984407028788)),
-                    ((30.0, 30.7936074477439), (23.07688512839, 30.7146316416511)),
-                    ((0.01668216046, 10.9342268458895), (0.0, H_REF)),  # trait vertical: fin du profil → haut de la tranche
-                ]
-                template_arcs = [
-                    (1.08491583019, 10.3633302143081, 1.211216800208252, 31.62499360406803, 151.87859451026, 12),
-                    (15.92508222671, 4.0531600629152, 7.154135318496002, 214.5098467304225, 358.5369002506969, 18),
-                ]
-
-                # Ligne de fermeture manquante: liaison entre l'ouverture arrondie et le haut de tranche.
-                arc2_cx, arc2_cy, arc2_r, _, arc2_a1, _ = template_arcs[1]
-                arc2_end = (
-                    arc2_cx + arc2_r * math.cos(math.radians(arc2_a1)),
-                    arc2_cy + arc2_r * math.sin(math.radians(arc2_a1)),
-                )
-                template_lines.append(((23.07688512839, 30.7146316416511), arc2_end))
-
-                d = 1.0 if (tx_outer > tx_face) else -1.0
-                tranche_w = abs(tx_outer - tx_face)
-                # Forme verrouillee a l'identique (pas de mise a l'echelle).
-                # Si la tranche differe de 30 mm, on centre simplement le gabarit.
-                x_shift = (tranche_w - W_REF) / 2.0
-                y_base = y1 - H_REF
-
-                def to_global(pt):
-                    lx, ly = pt
-                    if d > 0:
-                        gx = tx_face + x_shift + lx
-                    else:
-                        gx = tx_face - x_shift - lx
-                    gy = y_base + ly
-                    return gx, gy
-
-                def arc_pts(cx, cy, r, a0, a1, n=16):
-                    pts = []
-                    for i in range(n + 1):
-                        t = math.radians(a0 + (a1 - a0) * i / float(n))
-                        pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
-                    return pts
-
-                for p0, p1 in template_lines:
-                    g0 = to_global(p0)
-                    g1 = to_global(p1)
-                    msp.add_line(g0, g1, dxfattribs=profile_layer)
-
-                for cx, cy, r, a0, a1, n in template_arcs:
-                    pts = [to_global(p) for p in arc_pts(cx, cy, r, a0, a1, n)]
-                    msp.add_lwpolyline(pts, dxfattribs=profile_layer)
-        else:
-            # Découpe poignée intégrée: rectangle centré sur la façade.
-            cW = float(center_cutout_props.get('width', 150.0))
-            cH = float(center_cutout_props.get('height', 40.0))
-            cOff = float(center_cutout_props.get('offset_top', 10.0))
-            cW = min(max(1.0, cW), max(1.0, Lp - 2.0))
-            cH = min(max(1.0, cH), max(1.0, Wp - 2.0))
-            cx0 = x0 + (Lp - cW) / 2.0
-            cx1 = cx0 + cW
-            cy1 = y0 + Wp - cOff
-            cy0 = cy1 - cH
-            cy0 = max(y0 + 1.0, cy0)
-            cy1 = min(y1 - 1.0, cy1)
-            msp.add_lwpolyline([(cx0, cy0), (cx1, cy0), (cx1, cy1), (cx0, cy1), (cx0, cy0)], dxfattribs={"layer": "FEUILLURE", "color": 1})
 
     annotated_diams = set()
     
@@ -792,13 +573,6 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
         for err in validation_errors:
             print(f"[DXF VALIDATION] {title}: {err}", file=sys.stderr)
 
-    # Bounding box large pour cadrer correctement la feuille dans son layout dédié.
-    sheet_min_x = min(tg_x1, x0 - 300.0, cartouche_x_start - 50.0)
-    sheet_max_x = max(td_x1, x1 + 300.0, cartouche_x_start + cartouche_width + 50.0)
-    sheet_min_y = min(tb_y1 - 350.0, cartouche_y_top - cartouche_height - 50.0, y0 - 350.0)
-    sheet_max_y = max(y1 + 320.0, th_y1 + 200.0)
-    return (sheet_min_x, sheet_min_y, sheet_max_x, sheet_max_y)
-
 
 def get_automatic_edge_banding_export(part_name):
     name = part_name.lower()
@@ -809,7 +583,7 @@ def get_automatic_edge_banding_export(part_name):
     elif "traverse" in name: return True, True, False, False
     else: return True, True, True, True
 
-def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_format='html', selected_materials=None):
+def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_format='html'):
     """
     Génère un fichier HTML ou PDF contenant toutes les feuilles d'usinage du projet.
     
@@ -827,20 +601,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
     dxf_doc = None
     dxf_msp = None
     dxf_plan_index = 0
-    dxf_plan_layout_specs = []
-    rendered_plan_titles = []
     figures_out = []
-    selected_materials_set = {
-        str(mat).strip()
-        for mat in (selected_materials or [])
-        if str(mat).strip()
-    }
-
-    def _is_material_allowed(material_name):
-        if not selected_materials_set:
-            return True
-        return str(material_name or "").strip() in selected_materials_set
-
     if output_format == 'dxf':
         if not EZDXF_AVAILABLE:
             return b"Le module 'ezdxf' est requis pour l'export AutoCAD.", False
@@ -888,7 +649,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
     def _add_plan(title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut, has_rebate, proj_for_plan):
         nonlocal dxf_plan_index
         if output_format == 'dxf':
-            bbox = _add_plan_to_dxf(
+            _add_plan_to_dxf(
                 dxf_msp,
                 title,
                 Lp,
@@ -902,9 +663,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 origin_y=0.0,
                 ch=ch,
                 has_rebate=has_rebate,
-                center_cutout_props=cut,
             )
-            dxf_plan_layout_specs.append((str(title), bbox))
             dxf_plan_index += 1
             return
         return draw_machining_view_pro_final(
@@ -1174,10 +933,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     W_shelf = float(W_raw)
                     c_shelf = {"Chant Avant":True, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":False}
                     th_shelf = fixed_shelf_tr_draw.get(s_idx, [])
-                    shelf_material = str(s.get('material', 'Matière Étagère'))
                     # Créer une clé unique pour regrouper les étagères identiques
                     # Utiliser les dimensions et les trous pour identifier les étagères identiques
-                    shelf_key = (round(L_shelf, 1), round(W_shelf, 1), round(s_th, 1), shelf_material, s_type, tuple(sorted([(round(h['x'], 1), round(h['y'], 1), h['type'], h['diam_str']) for h in th_shelf])))
+                    shelf_key = (round(L_shelf, 1), round(W_shelf, 1), round(s_th, 1), s_type, tuple(sorted([(round(h['x'], 1), round(h['y'], 1), h['type'], h['diam_str']) for h in th_shelf])))
                     shelf_title = f"Etagère {s_type.capitalize()} (C{cab_idx})"
                     # Stocker les informations de l'étagère pour regroupement ultérieur
                     if shelf_key not in shelf_groups:
@@ -1191,25 +949,17 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             't_long_h': [],
                             't_cote_h': th_shelf,
                             'cut': None,
-                            'material': shelf_material,
                             'quantity': 0
                         }
                     shelf_groups[shelf_key]['quantity'] += 1
             
             # Ajouter les étagères regroupées à la liste des plans
             for shelf_key, shelf_data in shelf_groups.items():
-                if output_format == 'dxf':
-                    # DXF: 1 élément = 1 feuille, même pour des étagères identiques.
-                    for idx_instance in range(int(shelf_data['quantity'])):
-                        shelf_title_instance = f"{shelf_data['title']} #{idx_instance + 1}"
-                        plans.append((shelf_title_instance, shelf_data['L'], shelf_data['W'], shelf_data['T'], shelf_data['ch'], shelf_data['fh'], shelf_data['t_long_h'], shelf_data['t_cote_h'], shelf_data['cut'], False, shelf_data['material']))
-                        plan_quantities[shelf_title_instance] = 1
-                else:
-                    shelf_title_with_qty = shelf_data['title']
-                    if shelf_data['quantity'] > 1:
-                        shelf_title_with_qty = f"{shelf_data['title']} (x{shelf_data['quantity']})"
-                    plans.append((shelf_title_with_qty, shelf_data['L'], shelf_data['W'], shelf_data['T'], shelf_data['ch'], shelf_data['fh'], shelf_data['t_long_h'], shelf_data['t_cote_h'], shelf_data['cut'], False, shelf_data['material']))
-                    plan_quantities[shelf_title_with_qty] = shelf_data['quantity']
+                shelf_title_with_qty = shelf_data['title']
+                if shelf_data['quantity'] > 1:
+                    shelf_title_with_qty = f"{shelf_data['title']} (x{shelf_data['quantity']})"
+                plans.append((shelf_title_with_qty, shelf_data['L'], shelf_data['W'], shelf_data['T'], shelf_data['ch'], shelf_data['fh'], shelf_data['t_long_h'], shelf_data['t_cote_h'], shelf_data['cut']))
+                plan_quantities[shelf_title_with_qty] = shelf_data['quantity']
 
             # --- PORTE (MÊME LOGIQUE QUE 2.PY) ---
             if cab['door_props']['has_door']:
@@ -1241,79 +991,68 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             holes_md.append({'type':'vis','x':20.0,'y':y,'diam_str':"⌀5/11.5"})
                             holes_md.append({'type':'vis','x':52.0,'y':y,'diam_str':"⌀5/11.5"})
 
-            # --- TIROIRS : trous de coulisses sur montants principaux et secondaires ---
+            # --- TIROIRS (MÊME LOGIQUE QUE 2.PY) ---
             if 'drawers' in cab and cab['drawers']:
                 for drawer_idx, drp in enumerate(cab['drawers']):
-                    drawer_system = drp.get('drawer_system', 'TANDEMBOX')
                     tech_type = drp.get('drawer_tech_type', 'K')
                     y_slide = t_tb + 33.0 + drp.get('drawer_bottom_offset', 0.0)
                     drawer_zone_id = drp.get('zone_id', None)
-
-                    # Calcul des positions X des trous de coulisse selon la profondeur du caisson
-                    x_slide_holes = [19, 37]
+                    
+                    x_slide_holes = []
                     wr = W_raw
-                    if wr > 643:
-                        x_slide_holes = [19, 37, 133, 261, 293, 389, 421, 549]
-                    else:
-                        if tech_type == 'N':
-                            if 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
-                            elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
-                            elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                            elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                        if not x_slide_holes or x_slide_holes == [19, 37]:
-                            if wr <= 153: x_slide_holes = [19, 37]
-                            elif 153 < wr < 302: x_slide_holes = [19, 37, 133]
-                            elif 273 < wr < 302: x_slide_holes = [19, 37, 133, 261]
-                            elif 303 < wr < 352: x_slide_holes = [19, 37, 133, 165, 261]
-                            elif 353 < wr < 402: x_slide_holes = [19, 37, 133, 165, 325]
-                            elif 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
-                            elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
-                            elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                            elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
-                            elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
-
-                    # Tiroir à l'anglaise: perçages décalés de 30 mm depuis le bord.
-                    # (doit être APRÈS tout le calcul des positions, quel que soit le cas de profondeur)
-                    x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
-
-                    # Utiliser les LIMITES DE LA ZONE pour détecter les montants adjacents
+                    if wr > 643: x_slide_holes = [19, 37, 133, 261, 293, 389, 421, 549]
+                else:
+                    if tech_type == 'N':
+                        if 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
+                        elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
+                        elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                        elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                    if not x_slide_holes:
+                        if 273 < wr < 302: x_slide_holes = [19, 37, 133, 261]
+                        elif 303 < wr < 352: x_slide_holes = [19, 37, 133, 165, 261]
+                        elif 353 < wr < 402: x_slide_holes = [19, 37, 133, 165, 325]
+                        elif 403 < wr < 452: x_slide_holes = [19, 37, 133, 165, 229, 325]
+                        elif 453 < wr < 502: x_slide_holes = [19, 37, 133, 165, 261, 357]
+                        elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                        elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
+                        elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
+                    
+                    # Utiliser les LIMITES DE LA ZONE pour détecter les montants (MÊME LOGIQUE QUE 2.PY)
                     zone_x_min = None
                     zone_x_max = None
-
+                    
                     if drawer_zone_id is not None and drawer_zone_id < len(all_zones_2d):
                         zone = all_zones_2d[drawer_zone_id]
                         zone_x_min = zone['x_min']
                         zone_x_max = zone['x_max']
-
+                    
                     if zone_x_min is not None and zone_x_max is not None:
-                        # Montant gauche principal si la zone borde le montant gauche
+                        # Montant gauche principal si la zone commence au montant gauche
                         if abs(zone_x_min - t_lr) < 1.0:
                             for x_s in x_slide_holes:
                                 holes_mg.append({'type': 'vis', 'x': x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
-                        # Montant droit principal si la zone borde le montant droit
+                        # Montant droit principal si la zone se termine au montant droit
                         if abs(zone_x_max - (L_raw - t_lr)) < 1.0:
                             for x_s in x_slide_holes:
                                 holes_md.append({'type': 'vis', 'x': W_mont - x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
-
-                        # Montants secondaires mitoyens à ce tiroir (gauche ET droite de la zone)
+                        
+                        # Montants secondaires qui touchent ce tiroir
                         if 'vertical_dividers' in cab:
                             for div_idx, div in enumerate(cab['vertical_dividers']):
                                 div_x = div['position_x']
                                 div_th = div.get('thickness', 19.0)
                                 div_left_edge = div_x - div_th / 2.0
                                 div_right_edge = div_x + div_th / 2.0
-
-                                # Face droite du montant secondaire = bord gauche de la zone suivante
+                                
                                 touches_left_face = abs(zone_x_max - div_left_edge) < 1.0
-                                # Face gauche du montant secondaire = bord droit de la zone précédente
                                 touches_right_face = abs(zone_x_min - div_right_edge) < 1.0
-
+                                
                                 if touches_left_face:
                                     for x_s in x_slide_holes:
-                                        divider_element_holes_left[div_idx].append({'type': 'vis', 'x': x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
+                                        divider_element_holes_left[div_idx].append({'type':'vis','x':x_s,'y':y_slide,'diam_str':"⌀3"})
                                 if touches_right_face:
                                     for x_s in x_slide_holes:
-                                        divider_element_holes_right[div_idx].append({'type': 'vis', 'x': x_s, 'y': y_slide, 'diam_str': "⌀5/12"})
+                                        divider_element_holes_right[div_idx].append({'type':'vis','x':x_s,'y':y_slide,'diam_str':"⌀3"})
                     else:
                         # Tiroir sur tout le caisson : trous sur les deux montants principaux
                         for x_s in x_slide_holes:
@@ -1358,15 +1097,15 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             })
             
             if base_el.get('has_bottom_traverse', True):
-                plans.append(("Traverse Bas (Tb)", L_trav, W_mont, t_tb, c_trav, traverse_face_holes_left, tholes_longue, tholes_cote, None, False, cab.get('material_body', 'Matière Corps')))
+                plans.append(("Traverse Bas (Tb)", L_trav, W_mont, t_tb, c_trav, traverse_face_holes_left, tholes_longue, tholes_cote, None))
             if base_el.get('has_top_traverse', True):
-                plans.append(("Traverse Haut (Th)", L_trav, W_mont, t_tb, c_trav, traverse_face_holes_right, tholes_longue, tholes_cote, None, False, cab.get('material_body', 'Matière Corps')))
+                plans.append(("Traverse Haut (Th)", L_trav, W_mont, t_tb, c_trav, traverse_face_holes_right, tholes_longue, tholes_cote, None))
             if base_el.get('has_left_upright', True):
-                plans.append(("Montant Gauche (Mg)", W_mont, h_side, t_lr, c_mont, holes_mg, [], tranche_holes_mg, None, False, cab.get('material_body', 'Matière Corps')))
+                plans.append(("Montant Gauche (Mg)", W_mont, h_side, t_lr, c_mont, holes_mg, [], tranche_holes_mg, None))
             if base_el.get('has_right_upright', True):
-                plans.append(("Montant Droit (Md)", W_mont, h_side, t_lr, c_mont, holes_md, [], tranche_holes_md, None, False, cab.get('material_body', 'Matière Corps')))
+                plans.append(("Montant Droit (Md)", W_mont, h_side, t_lr, c_mont, holes_md, [], tranche_holes_md, None))
             if base_el.get('has_back_panel', True):
-                plans.append(("Panneau Arrière (F)", W_back, H_back, t_fb, c_fond, holes_fond, [], [], None, False, cab.get('material_body', 'Matière Corps')))
+                plans.append(("Panneau Arrière (F)", W_back, H_back, t_fb, c_fond, holes_fond, [], [], None))
 
             # --- TIROIRS (GROUPÉS PAR DIMENSIONS IDENTIQUES) ---
             if 'drawers' in cab and cab['drawers']:
@@ -1388,9 +1127,13 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     tech_type = drp.get('drawer_tech_type', 'K')
                     dr_thickness = drp.get('drawer_face_thickness', 19.0)
                     inner_thickness = float(drp.get('inner_thickness', 16.0))
-                    face_material = str(drp.get('material', 'Matière Tiroir'))
-                    inner_material = str(drp.get('material_inner', cab.get('material_body', 'Matière Corps')))
-                    cutout = _drawer_handle_signature(drp)
+                    cutout = None
+                    if drp.get('drawer_handle_type') == 'integrated_cutout':
+                        cutout = (
+                            drp.get('drawer_handle_width', 150.0),
+                            drp.get('drawer_handle_height', 40.0),
+                            drp.get('drawer_handle_offset_top', 10.0)
+                        )
                     
                     if drawer_system == 'LÉGRABOX':
                         legrabox_specs = get_legrabox_specs()
@@ -1401,14 +1144,6 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         zone_depth_interior = W_raw - (2 * t_lr)
                         fond_L = max(0.0, zone_width_interior - 35.0)
                         fond_H = max(0.0, zone_depth_interior - 10.0)
-                    elif drawer_system == 'ANGLAISE':
-                        # ANGLAISE : 2 mm de jeu de chaque côté par rapport aux montants
-                        dr_L = max(0.0, zone_width_total - 4.0)
-                        back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
-                        fixed_back_h = back_height_map.get(tech_type, 116.0)
-                        d_L_t = max(0.0, dr_L - 40.0)
-                        fond_L = max(0.0, dr_L - 49.0)
-                        fond_H = round(W_raw - (20.0 + t_fb), 1)
                     else:
                         dr_L = zone_width_total - (2 * gap_mm)
                         back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
@@ -1419,9 +1154,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     
                     # Signature : (face_L, face_H, face_th, system, tech_type, cutout, dos_L, dos_H, dos_th, fond_L, fond_H, fond_th)
                     return (
-                        round(dr_L, 1), round(dr_H, 1), round(dr_thickness, 1), face_material, drawer_system, tech_type, cutout,
+                        round(dr_L, 1), round(dr_H, 1), round(dr_thickness, 1), drawer_system, tech_type, cutout,
                         round(d_L_t, 1), round(fixed_back_h, 1), round(inner_thickness, 1),
-                        round(fond_L, 1), round(fond_H, 1), round(inner_thickness, 1), inner_material
+                        round(fond_L, 1), round(fond_H, 1), round(inner_thickness, 1)
                     )
                 
                 # Grouper les tiroirs par signature
@@ -1437,7 +1172,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 legrabox_specs = get_legrabox_specs()
                 for sig, group in drawer_groups.items():
                     group_num += 1
-                    dr_L, dr_H, dr_thickness, face_material, drawer_system, tech_type, cutout, d_L_t, fixed_back_h, inner_thickness, fond_L, fond_H, _, inner_material = sig
+                    dr_L, dr_H, dr_thickness, drawer_system, tech_type, cutout, d_L_t, fixed_back_h, inner_thickness, fond_L, fond_H, _ = sig
                     quantity = len(group)
                     
                     # Prendre le premier tiroir du groupe pour les données de référence
@@ -1480,8 +1215,10 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                             d_holes_t.append({'type': 'vis_dos', 'x': 9.0, 'y': dy, 'diam_str': "⌀3"}) 
                             d_holes_t.append({'type': 'vis_dos', 'x': d_L_t - 9.0, 'y': dy, 'diam_str': "⌀3"}) 
                     
-                    # Convertir la signature de poignée en paramètres de découpe.
-                    cutout_dict = _handle_signature_to_cutout_props(cutout)
+                    # Convertir cutout tuple en dict si présent
+                    cutout_dict = None
+                    if cutout:
+                        cutout_dict = {'width': cutout[0], 'height': cutout[1], 'offset_top': cutout[2]}
                     
                     # Créer un proj avec la quantité pour ce groupe
                     proj_group = proj.copy()
@@ -1493,44 +1230,24 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     
                     c_fa = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
                     title_face = f"Façade Tiroir Groupe {group_num} (C{cab_idx}){system_label}{title_suffix}"
-                    if output_format == 'dxf':
-                        for idx_instance in range(quantity):
-                            title_face_instance = f"Façade Tiroir Groupe {group_num} (C{cab_idx}){system_label} #{idx_instance + 1}"
-                            plans.append((title_face_instance, dr_L, dr_H, dr_thickness, c_fa, f_holes, [], [], cutout_dict, False, face_material))
-                            plan_quantities[title_face_instance] = 1
-                    else:
-                        plans.append((title_face, dr_L, dr_H, dr_thickness, c_fa, f_holes, [], [], cutout_dict, False, face_material))
-                        plan_quantities[title_face] = quantity
+                    plans.append((title_face, dr_L, dr_H, dr_thickness, c_fa, f_holes, [], [], cutout_dict))
+                    plan_quantities[title_face] = quantity
                     
                     c_td = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":False}
                     title_dos = f"Tiroir-Dos Groupe {group_num} (C{cab_idx}){system_label}{title_suffix}"
-                    if output_format == 'dxf':
-                        for idx_instance in range(quantity):
-                            title_dos_instance = f"Tiroir-Dos Groupe {group_num} (C{cab_idx}){system_label} #{idx_instance + 1}"
-                            plans.append((title_dos_instance, d_L_t, fixed_back_h, inner_thickness, c_td, d_holes_t, [], [], None, False, inner_material))
-                            plan_quantities[title_dos_instance] = 1
-                    else:
-                        plans.append((title_dos, d_L_t, fixed_back_h, inner_thickness, c_td, d_holes_t, [], [], None, False, inner_material))
-                        plan_quantities[title_dos] = quantity
+                    plans.append((title_dos, d_L_t, fixed_back_h, inner_thickness, c_td, d_holes_t, [], [], None))
+                    plan_quantities[title_dos] = quantity
                     
                     title_fond = f"Tiroir-Fond Groupe {group_num} (C{cab_idx}){system_label}{title_suffix}"
                     # Passer has_rebate=True pour LÉGRABOX (le paramètre sera ajouté à la fin de la tuple)
-                    if output_format == 'dxf':
-                        for idx_instance in range(quantity):
-                            title_fond_instance = f"Tiroir-Fond Groupe {group_num} (C{cab_idx}){system_label} #{idx_instance + 1}"
-                            plan_tuple = (title_fond_instance, fond_L, fond_H, inner_thickness, c_td, bottom_holes if drawer_system == 'LÉGRABOX' else [], [], [], None, drawer_system == 'LÉGRABOX', inner_material)
-                            plans.append(plan_tuple)
-                            plan_quantities[title_fond_instance] = 1
-                    else:
-                        plan_tuple = (title_fond, fond_L, fond_H, inner_thickness, c_td, bottom_holes if drawer_system == 'LÉGRABOX' else [], [], [], None, drawer_system == 'LÉGRABOX', inner_material)
-                        plans.append(plan_tuple)
-                        plan_quantities[title_fond] = quantity
+                    plan_tuple = (title_fond, fond_L, fond_H, inner_thickness, c_td, bottom_holes if drawer_system == 'LÉGRABOX' else [], [], [], None, drawer_system == 'LÉGRABOX')
+                    plans.append(plan_tuple)
+                    plan_quantities[title_fond] = quantity
             
             # --- PORTE ---
             if cab['door_props']['has_door']:
                 dp = cab['door_props']
                 door_type = dp.get('door_type', 'single')
-                door_model = dp.get('door_model', 'standard')
                 dH = H_raw + 80.0 - dp['door_gap'] if dp.get('door_model')=='floor_length' else H_raw - (2 * dp['door_gap'])
                 hinge_base_h = max(1.0, dH - 80.0) if dp.get('door_model') == 'floor_length' else dH
                 hinge_y_offset = 80.0 if dp.get('door_model') == 'floor_length' else 0.0
@@ -1562,17 +1279,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         holes_p_d.append({'type':'tourillon','x':xc_d,'y':y,'diam_str':"⌀35"})
                         holes_p_d.append({'type':'vis','x':xv_d,'y':y+22.5,'diam_str':"⌀8"})
                         holes_p_d.append({'type':'vis','x':xv_d,'y':y-22.5,'diam_str':"⌀8"})
-
-                    c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
-                    if door_model == 'floor_length' and output_format in {'dxf', 'figures'}:
-                        left_title = _get_door_plan_title(cab_idx, 'left', door_model, output_format)
-                        right_title = _get_door_plan_title(cab_idx, 'right', door_model, output_format)
-                        plan_quantities[left_title] = 1
-                        plan_quantities[right_title] = 1
-                        plans.append((left_title, dW_half, dH, dp['door_thickness'], c_p, holes_p_g, [], [], None, False, dp.get('material', 'Matière Porte')))
-                        plans.append((right_title, dW_half, dH, dp['door_thickness'], c_p, holes_p_d, [], [], None, False, dp.get('material', 'Matière Porte')))
-                        continue
-
+                    
                     # Utiliser holes_p_g pour la feuille d'usinage (les deux battants sont identiques)
                     holes_p = holes_p_g
                     dW = dW_half
@@ -1597,10 +1304,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     door_quantity = 1
                 
                 c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
-                door_title = _get_door_plan_title(cab_idx, dp.get('door_opening'), door_model, output_format)
                 # Stocker la quantité pour la porte dans plan_quantities
-                plan_quantities[door_title] = door_quantity
-                plans.append((door_title, dW, dH, dp['door_thickness'], c_p, holes_p, [], [], None, False, dp.get('material', 'Matière Porte')))
+                plan_quantities[f"Porte (C{cab_idx})"] = door_quantity
+                plans.append((f"Porte (C{cab_idx})", dW, dH, dp['door_thickness'], c_p, holes_p, [], [], None))
             
             # --- MONTANTS SECONDAIRES (MÊME LOGIQUE QUE 2.PY) ---
             if 'vertical_dividers' in cab and cab['vertical_dividers']:
@@ -1616,41 +1322,11 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     c_div_22 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":True, "Chant Droit":False}
                     
                     # TOUJOURS générer 2 plans (1/2 et 2/2) pour chaque montant secondaire
-                    divider_material = div.get('material', cab.get('material_body', 'Matière Corps'))
-                    holes_div_left = divider_element_holes_left.get(div_idx, [])
-                    holes_div_right = divider_element_holes_right.get(div_idx, [])
-                    title_12 = _get_secondary_divider_title(div_idx, cab_idx, "1/2", output_format)
-                    title_22 = _get_secondary_divider_title(div_idx, cab_idx, "2/2", output_format)
-                    plans.append((title_12, div_w, div_h, div_th, c_div_12, holes_div_left, div_tranche_holes, [], None, False, divider_material))
-                    plans.append((title_22, div_w, div_h, div_th, c_div_22, holes_div_right, div_tranche_holes, [], None, False, divider_material))
-
-            # Garde-fou: forcer les 2 feuilles par montant secondaire même si un traitement amont a sauté.
-            if 'vertical_dividers' in cab and cab['vertical_dividers']:
-                existing_plan_titles = {str(p[0]) for p in plans if isinstance(p, tuple) and len(p) >= 1}
-                for div_idx, div in enumerate(cab['vertical_dividers']):
-                    div_th = div.get('thickness', 19.0)
-                    div_h = h_side
-                    div_w = W_mont
-                    div_tranche_holes = get_vertical_divider_tranche_holes(W_mont, div_th)
-                    c_div_12 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":True}
-                    c_div_22 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":True, "Chant Droit":False}
-                    divider_material = div.get('material', cab.get('material_body', 'Matière Corps'))
-
-                    title_12 = _get_secondary_divider_title(div_idx, cab_idx, "1/2", output_format)
-                    if title_12 not in existing_plan_titles:
-                        plans.append((title_12, div_w, div_h, div_th, c_div_12, divider_element_holes_left.get(div_idx, []), div_tranche_holes, [], None, False, divider_material))
-                        existing_plan_titles.add(title_12)
-
-                    title_22 = _get_secondary_divider_title(div_idx, cab_idx, "2/2", output_format)
-                    if title_22 not in existing_plan_titles:
-                        plans.append((title_22, div_w, div_h, div_th, c_div_22, divider_element_holes_right.get(div_idx, []), div_tranche_holes, [], None, False, divider_material))
-                        existing_plan_titles.add(title_22)
+                    plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2", div_w, div_h, div_th, c_div_12, divider_element_holes_left[div_idx], div_tranche_holes, [], None))
+                    plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2", div_w, div_h, div_th, c_div_22, divider_element_holes_right[div_idx], div_tranche_holes, [], None))
 
             for item in plans:
-                material_name = ""
-                if len(item) == 11:
-                    title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut, has_rebate, material_name = item
-                elif len(item) == 10:
+                if len(item) == 10: 
                     title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut, has_rebate = item
                 elif len(item) == 9: 
                     title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut = item
@@ -1659,18 +1335,11 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     title, Lp, Wp, Tp, ch, fh, t_long_h, cut = item
                     t_cote_h = []
                     has_rebate = False
-
-                if not _is_material_allowed(material_name):
-                    # Les montants secondaires doivent toujours apparaître en DXF.
-                    if not (output_format == 'dxf' and _is_secondary_divider_title(title)):
-                        continue
-
                 # Utiliser la quantité spécifique pour ce plan si disponible (tiroirs groupés)
                 proj_for_plan = proj.copy()
                 if title in plan_quantities:
                     proj_for_plan['quantity'] = plan_quantities[title]
                 fig = _add_plan(title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut, has_rebate, proj_for_plan)
-                rendered_plan_titles.append(title)
                 if output_format == 'dxf':
                     continue
 
@@ -1681,7 +1350,6 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         meta['sheet_title'] = title
                         meta['cabinet_index'] = int(cab_idx)
                         meta['corps_meuble'] = f"Caisson {int(cab_idx)}"
-                        meta['material'] = material_name
                         fig.layout.meta = meta
                     except Exception:
                         pass
@@ -1712,19 +1380,20 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
         # === VALIDATION STRICTE POUR DXF ===
         if output_format == 'dxf':
             # Vérifier que le nombre de layouts DXF = nombre d'éléments dans plans
-            expected_count = len(rendered_plan_titles)
+            expected_count = len(plans)
             actual_count = dxf_plan_index
             
             if expected_count != actual_count:
                 error_msg = (
                     f"[DXF EXPORT ERROR] VALIDATION FAILED:\n"
-                    f"Expected {expected_count} layouts in DXF (after material filter)\n"
+                    f"Expected {expected_count} layouts in DXF (from plans list)\n"
                     f"Got {actual_count} layouts actually drawn\n"
                     f"{expected_count - actual_count} elements were SKIPPED!\n"
-                    f"\nRendered plans list contents:\n"
+                    f"\nPlans list contents:\n"
                 )
-                for i, title in enumerate(rendered_plan_titles, 1):
+                for i, item in enumerate(plans, 1):
                     try:
+                        title = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
                         error_msg += f"  {i}. {title}\n"
                     except:
                         error_msg += f"  {i}. [Error parsing item]\n"
@@ -1734,22 +1403,6 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 return error_msg.encode('utf-8'), False
 
             if dxf_plan_index > 0:
-                # 1 objet en modelspace = 1 feuille PaperSpace dédiée.
-                layout_creation_errors = []
-                for i, (plan_title, plan_bbox) in enumerate(dxf_plan_layout_specs, start=1):
-                    # Nommage séquentiel robuste: évite toute collision/troncature liée aux titres.
-                    layout_name = _sheet_layout_name(i)
-                    try:
-                        _create_layout_for_plan(dxf_doc, layout_name, plan_bbox)
-                    except Exception as e:
-                        layout_creation_errors.append(f"{layout_name} ({plan_title}): {e}")
-
-                if layout_creation_errors:
-                    error_msg = "[DXF EXPORT ERROR] Impossible de créer toutes les feuilles d'usinage:\n"
-                    for err in layout_creation_errors:
-                        error_msg += f" - {err}\n"
-                    return error_msg.encode('utf-8'), False
-
                 legend_x = dxf_plan_index * 2600.0 + 500.0
                 legend_y = 0.0
 
@@ -2032,7 +1685,6 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
         # Trous pour tiroirs
         if 'drawers' in cab and cab['drawers']:
             for drawer_idx, drp in enumerate(cab['drawers']):
-                drawer_system = drp.get('drawer_system', 'TANDEMBOX')
                 y_slide = t_tb + 33.0 + drp.get('drawer_bottom_offset', 0.0)
                 drawer_zone_id = drp.get('zone_id', None)
                 x_slide_holes = [19, 37]
@@ -2046,9 +1698,6 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 elif 503 < wr < 552: x_slide_holes = [19, 37, 133, 261, 293, 453]
                 elif 553 < wr < 602: x_slide_holes = [19, 37, 133, 261, 293, 453]
                 elif 603 < wr < 652: x_slide_holes = [19, 37, 133, 261, 293, 325, 357, 517]
-
-                # Tiroir à l'anglaise: perçages décalés de 30 mm depuis le bord.
-                x_slide_holes = _apply_anglaise_slide_offset(drawer_system, x_slide_holes, W_mont)
                 
                 zone_x_min = None
                 zone_x_max = None
@@ -2149,7 +1798,13 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 tech_type = drp.get('drawer_tech_type', 'K')
                 dr_thickness = drp.get('drawer_face_thickness', 19.0)
                 inner_thickness = float(drp.get('inner_thickness', 16.0))
-                cutout = _drawer_handle_signature(drp)
+                cutout = None
+                if drp.get('drawer_handle_type') == 'integrated_cutout':
+                    cutout = (
+                        drp.get('drawer_handle_width', 150.0),
+                        drp.get('drawer_handle_height', 40.0),
+                        drp.get('drawer_handle_offset_top', 10.0)
+                    )
                 
                 if drawer_system == 'LÉGRABOX':
                     legrabox_specs = get_legrabox_specs()
@@ -2160,14 +1815,6 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     zone_depth_interior = W_raw - (2 * t_lr)
                     fond_L = max(0.0, zone_width_interior - 35.0)
                     fond_H = max(0.0, zone_depth_interior - 10.0)
-                elif drawer_system == 'ANGLAISE':
-                    # ANGLAISE : 2 mm de jeu de chaque côté par rapport aux montants
-                    dr_L = max(0.0, zone_width_total - 4.0)
-                    back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
-                    fixed_back_h = back_height_map.get(tech_type, 116.0)
-                    d_L_t = max(0.0, dr_L - 40.0)
-                    fond_L = max(0.0, dr_L - 49.0)
-                    fond_H = round(W_raw - (20.0 + t_fb), 1)
                 else:
                     dr_L = zone_width_total - (2 * gap_mm)
                     back_height_map = {'N': 69.0, 'M': 84.0, 'K': 116.0, 'D': 199.0}
@@ -2243,8 +1890,10 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                             bottom_holes.append({'type': 'vis_fond', 'x': 9.0, 'y': dy, 'diam_str': "⌀3"})
                             bottom_holes.append({'type': 'vis_fond', 'x': fond_L - 9.0, 'y': dy, 'diam_str': "⌀3"})
                 
-                # Convertir la signature de poignée en paramètres de découpe.
-                cutout_dict = _handle_signature_to_cutout_props(cutout)
+                # Convertir cutout tuple en dict si présent
+                cutout_dict = None
+                if cutout:
+                    cutout_dict = {'width': cutout[0], 'height': cutout[1], 'offset_top': cutout[2]}
                 
                 # Créer un proj avec la quantité pour ce groupe
                 proj_group = proj.copy()
@@ -2354,7 +2003,6 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
         
         # Montants secondaires (diviseurs verticaux)
         if 'vertical_dividers' in cab and cab['vertical_dividers']:
-            added_divider_sheet_titles = set()
             for div_idx, div in enumerate(cab['vertical_dividers']):
                 div_h = div.get('height', h_side)
                 div_w = W_mont
@@ -2374,7 +2022,6 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     divider_element_holes_left[div_idx],
                     div_tranche_holes,
                 )
-                added_divider_sheet_titles.add(f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2")
                 
                 fig_div2 = draw_machining_view_pro_final(
                     f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2",
@@ -2387,36 +2034,6 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     divider_element_holes_right[div_idx],
                     div_tranche_holes,
                 )
-                added_divider_sheet_titles.add(f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2")
-
-            # Garde-fou: ajouter les feuilles manquantes de montants secondaires si nécessaire.
-            for div_idx, div in enumerate(cab['vertical_dividers']):
-                div_h = div.get('height', h_side)
-                div_w = W_mont
-                div_th = div.get('thickness', 19.0)
-                div_tranche_holes = get_vertical_divider_tranche_holes(W_mont, div_th)
-                c_div_12 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":True}
-                c_div_22 = {"Chant Avant":False, "Chant Arrière":False, "Chant Gauche":True, "Chant Droit":False}
-
-                title_12 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2"
-                if title_12 not in added_divider_sheet_titles:
-                    fig_div1 = draw_machining_view_pro_final(
-                        title_12,
-                        div_w, div_h, div_th, st.session_state.unit_select, proj, c_div_12,
-                        divider_element_holes_left.get(div_idx, []), div_tranche_holes, [], None, False
-                    )
-                    _append_figure(title_12, fig_div1, divider_element_holes_left.get(div_idx, []), div_tranche_holes)
-                    added_divider_sheet_titles.add(title_12)
-
-                title_22 = f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2"
-                if title_22 not in added_divider_sheet_titles:
-                    fig_div2 = draw_machining_view_pro_final(
-                        title_22,
-                        div_w, div_h, div_th, st.session_state.unit_select, proj, c_div_22,
-                        divider_element_holes_right.get(div_idx, []), div_tranche_holes, [], None, False
-                    )
-                    _append_figure(title_22, fig_div2, divider_element_holes_right.get(div_idx, []), div_tranche_holes)
-                    added_divider_sheet_titles.add(title_22)
         
         # Étagères
         if shelves_list:
@@ -2494,45 +2111,18 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                 y_h = get_hinge_y_positions(hinge_base_h)
             y_h = [y + hinge_y_offset for y in y_h]
 
+            holes_p = []
             door_type = dp.get('door_type', 'single')
-            door_model = dp.get('door_model', 'standard')
-            c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
-
             if door_type == 'double':
                 dW = (L_raw - (2 * dp['door_gap'])) / 2.0
-
-                holes_p_left = []
+                xc = 23.5
+                xv = 33.0
                 for y in y_h:
-                    holes_p_left.append({'type': 'tourillon', 'x': 23.5, 'y': y, 'diam_str': "⌀35"})
-                    holes_p_left.append({'type': 'vis', 'x': 33.0, 'y': y + 22.5, 'diam_str': "⌀8"})
-                    holes_p_left.append({'type': 'vis', 'x': 33.0, 'y': y - 22.5, 'diam_str': "⌀8"})
-
-                if door_model == 'floor_length':
-                    holes_p_right = []
-                    right_cup_x = dW - 23.5
-                    right_screw_x = dW - 33.0
-                    for y in y_h:
-                        holes_p_right.append({'type': 'tourillon', 'x': right_cup_x, 'y': y, 'diam_str': "⌀35"})
-                        holes_p_right.append({'type': 'vis', 'x': right_screw_x, 'y': y + 22.5, 'diam_str': "⌀8"})
-                        holes_p_right.append({'type': 'vis', 'x': right_screw_x, 'y': y - 22.5, 'diam_str': "⌀8"})
-
-                    for opening, holes_p in (('left', holes_p_left), ('right', holes_p_right)):
-                        door_title = _get_door_plan_title(cab_idx, opening, door_model, 'figures')
-                        fig_door = draw_machining_view_pro_final(
-                            door_title, dW, dH, dp.get('door_thickness', 19.0),
-                            st.session_state.unit_select, proj, c_fa, holes_p, [], [], None, False
-                        )
-                        _append_figure(door_title, fig_door, holes_p)
-                else:
-                    door_title = _get_door_plan_title(cab_idx, None, door_model, 'figures')
-                    fig_door = draw_machining_view_pro_final(
-                        door_title, dW, dH, dp.get('door_thickness', 19.0),
-                        st.session_state.unit_select, proj, c_fa, holes_p_left, [], [], None, False
-                    )
-                    _append_figure(door_title, fig_door, holes_p_left)
+                    holes_p.append({'type': 'tourillon', 'x': xc, 'y': y, 'diam_str': "⌀35"})
+                    holes_p.append({'type': 'vis', 'x': xv, 'y': y + 22.5, 'diam_str': "⌀8"})
+                    holes_p.append({'type': 'vis', 'x': xv, 'y': y - 22.5, 'diam_str': "⌀8"})
             else:
                 dW = L_raw - (2 * dp['door_gap'])
-                holes_p = []
                 xc = 23.5 if dp.get('door_opening') == 'left' else dW - 23.5
                 xv = 33.0 if dp.get('door_opening') == 'left' else dW - 33.0
                 for y in y_h:
@@ -2540,12 +2130,12 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process, inc
                     holes_p.append({'type': 'vis', 'x': xv, 'y': y + 22.5, 'diam_str': "⌀8"})
                     holes_p.append({'type': 'vis', 'x': xv, 'y': y - 22.5, 'diam_str': "⌀8"})
 
-                door_title = _get_door_plan_title(cab_idx, dp.get('door_opening'), door_model, 'figures')
-                fig_door = draw_machining_view_pro_final(
-                    door_title, dW, dH, dp.get('door_thickness', 19.0),
-                    st.session_state.unit_select, proj, c_fa, holes_p, [], [], None, False
-                )
-                _append_figure(door_title, fig_door, holes_p)
+            c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
+            fig_door = draw_machining_view_pro_final(
+                f"Porte (C{cab_idx})", dW, dH, dp.get('door_thickness', 19.0),
+                st.session_state.unit_select, proj, c_fa, holes_p, [], [], None, False
+            )
+            _append_figure(f"Porte (C{cab_idx})", fig_door, holes_p)
 
     if include_hole_counts:
         return all_figures, hole_counts
