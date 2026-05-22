@@ -1249,7 +1249,12 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 dp = cab['door_props']
                 door_type = dp.get('door_type', 'single')
                 dH = H_raw + st.session_state.foot_height - dp['door_gap'] - 10.0 if dp.get('door_model')=='floor_length' else H_raw - (2 * dp['door_gap'])
-                hinge_set_offset = 80.0 if dp.get('door_model') == 'floor_length' else 0.0
+                if dp.get('door_model') == 'floor_length' and door_type == 'double':
+                    hinge_set_offset = 800.0
+                elif dp.get('door_model') == 'floor_length':
+                    hinge_set_offset = 80.0
+                else:
+                    hinge_set_offset = 0.0
                 
                 if door_type == 'double':
                     # Porte double : générer deux feuilles d'usinage (une pour chaque battant)
@@ -1978,7 +1983,13 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
         if cab.get('door_props', {}).get('has_door', False):
             dp = cab['door_props']
             dH = H_raw + st.session_state.foot_height - dp['door_gap'] - 10.0 if dp.get('door_model') == 'floor_length' else H_raw - (2 * dp['door_gap'])
-            hinge_set_offset = 80.0 if dp.get('door_model') == 'floor_length' else 0.0
+            door_type = dp.get('door_type', 'single')
+            if dp.get('door_model') == 'floor_length' and door_type == 'double':
+                hinge_set_offset = 800.0
+            elif dp.get('door_model') == 'floor_length':
+                hinge_set_offset = 80.0
+            else:
+                hinge_set_offset = 0.0
 
             if dp.get('hinge_mode') == 'custom' and dp.get('custom_hinge_positions'):
                 y_h = get_hinge_y_positions(dH, custom_positions=dp['custom_hinge_positions'])
@@ -1986,7 +1997,6 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                 y_h = get_hinge_y_positions(dH)
 
             holes_p = []
-            door_type = dp.get('door_type', 'single')
             if door_type == 'double':
                 dW = (L_raw - (2 * dp['door_gap'])) / 2.0
                 holes_p_left = []
