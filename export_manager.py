@@ -1249,6 +1249,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 dp = cab['door_props']
                 door_type = dp.get('door_type', 'single')
                 dH = H_raw + st.session_state.foot_height - dp['door_gap'] - 10.0 if dp.get('door_model')=='floor_length' else H_raw - (2 * dp['door_gap'])
+                hinge_set_offset = 80.0 if dp.get('door_model') == 'floor_length' else 0.0
                 
                 if door_type == 'double':
                     # Porte double : générer deux feuilles d'usinage (une pour chaque battant)
@@ -1261,8 +1262,8 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     
                     # Porte gauche : trous à gauche (xc=23.5, xv=33.0)
                     holes_p_g = []
-                    xc_g = 23.5
-                    xv_g = 33.0
+                    xc_g = 23.5 + hinge_set_offset
+                    xv_g = 33.0 + hinge_set_offset
                     for y in y_h:
                         holes_p_g.append({'type':'tourillon','x':xc_g,'y':y,'diam_str':"⌀35"})
                         holes_p_g.append({'type':'vis','x':xv_g,'y':y+22.5,'diam_str':"⌀8"})
@@ -1270,12 +1271,22 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     
                     # Porte droite : trous à droite (xc=dW_half-23.5, xv=dW_half-33.0)
                     holes_p_d = []
-                    xc_d = dW_half - 23.5
-                    xv_d = dW_half - 33.0
+                    xc_d = dW_half - 23.5 - hinge_set_offset
+                    xv_d = dW_half - 33.0 - hinge_set_offset
                     for y in y_h:
                         holes_p_d.append({'type':'tourillon','x':xc_d,'y':y,'diam_str':"⌀35"})
                         holes_p_d.append({'type':'vis','x':xv_d,'y':y+22.5,'diam_str':"⌀8"})
                         holes_p_d.append({'type':'vis','x':xv_d,'y':y-22.5,'diam_str':"⌀8"})
+
+                    if dp.get('door_model') == 'floor_length':
+                        c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
+                        title_left = f"Porte Gauche (C{cab_idx})"
+                        title_right = f"Porte Droite (C{cab_idx})"
+                        plan_quantities[title_left] = 1
+                        plan_quantities[title_right] = 1
+                        plans.append((title_left, dW_half, dH, dp['door_thickness'], c_p, holes_p_g, [], [], None))
+                        plans.append((title_right, dW_half, dH, dp['door_thickness'], c_p, holes_p_d, [], [], None))
+                        continue
                     
                     # Utiliser holes_p_g pour la feuille d'usinage (les deux battants sont identiques)
                     holes_p = holes_p_g
@@ -1291,8 +1302,12 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         y_h = get_hinge_y_positions(dH)
                     
                     holes_p = []
-                    xc = 23.5 if dp['door_opening']=='left' else dW-23.5
-                    xv = 33.0 if dp['door_opening']=='left' else dW-33.0
+                    if dp['door_opening']=='left':
+                        xc = 23.5 + hinge_set_offset
+                        xv = 33.0 + hinge_set_offset
+                    else:
+                        xc = dW - 23.5 - hinge_set_offset
+                        xv = dW - 33.0 - hinge_set_offset
                     for y in y_h:
                         holes_p.append({'type':'tourillon','x':xc,'y':y,'diam_str':"⌀35"})
                         holes_p.append({'type':'vis','x':xv,'y':y+22.5,'diam_str':"⌀8"})
@@ -1963,6 +1978,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
         if cab.get('door_props', {}).get('has_door', False):
             dp = cab['door_props']
             dH = H_raw + st.session_state.foot_height - dp['door_gap'] - 10.0 if dp.get('door_model') == 'floor_length' else H_raw - (2 * dp['door_gap'])
+            hinge_set_offset = 80.0 if dp.get('door_model') == 'floor_length' else 0.0
 
             if dp.get('hinge_mode') == 'custom' and dp.get('custom_hinge_positions'):
                 y_h = get_hinge_y_positions(dH, custom_positions=dp['custom_hinge_positions'])
@@ -1973,16 +1989,41 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
             door_type = dp.get('door_type', 'single')
             if door_type == 'double':
                 dW = (L_raw - (2 * dp['door_gap'])) / 2.0
-                xc = 23.5
-                xv = 33.0
+                holes_p_left = []
+                holes_p_right = []
                 for y in y_h:
-                    holes_p.append({'type': 'tourillon', 'x': xc, 'y': y, 'diam_str': "⌀35"})
-                    holes_p.append({'type': 'vis', 'x': xv, 'y': y + 22.5, 'diam_str': "⌀8"})
-                    holes_p.append({'type': 'vis', 'x': xv, 'y': y - 22.5, 'diam_str': "⌀8"})
+                    holes_p_left.append({'type': 'tourillon', 'x': 23.5 + hinge_set_offset, 'y': y, 'diam_str': "⌀35"})
+                    holes_p_left.append({'type': 'vis', 'x': 33.0 + hinge_set_offset, 'y': y + 22.5, 'diam_str': "⌀8"})
+                    holes_p_left.append({'type': 'vis', 'x': 33.0 + hinge_set_offset, 'y': y - 22.5, 'diam_str': "⌀8"})
+
+                    holes_p_right.append({'type': 'tourillon', 'x': dW - 23.5 - hinge_set_offset, 'y': y, 'diam_str': "⌀35"})
+                    holes_p_right.append({'type': 'vis', 'x': dW - 33.0 - hinge_set_offset, 'y': y + 22.5, 'diam_str': "⌀8"})
+                    holes_p_right.append({'type': 'vis', 'x': dW - 33.0 - hinge_set_offset, 'y': y - 22.5, 'diam_str': "⌀8"})
+
+                if dp.get('door_model') == 'floor_length':
+                    c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
+                    fig_door_left = draw_machining_view_pro_final(
+                        f"Porte Gauche (C{cab_idx})", dW, dH, dp.get('door_thickness', 19.0),
+                        st.session_state.unit_select, proj, c_fa, holes_p_left, [], [], None, False
+                    )
+                    all_figures.append((f"Porte Gauche (C{cab_idx})", fig_door_left))
+
+                    fig_door_right = draw_machining_view_pro_final(
+                        f"Porte Droite (C{cab_idx})", dW, dH, dp.get('door_thickness', 19.0),
+                        st.session_state.unit_select, proj, c_fa, holes_p_right, [], [], None, False
+                    )
+                    all_figures.append((f"Porte Droite (C{cab_idx})", fig_door_right))
+                    continue
+
+                holes_p = holes_p_left
             else:
                 dW = L_raw - (2 * dp['door_gap'])
-                xc = 23.5 if dp.get('door_opening') == 'left' else dW - 23.5
-                xv = 33.0 if dp.get('door_opening') == 'left' else dW - 33.0
+                if dp.get('door_opening') == 'left':
+                    xc = 23.5 + hinge_set_offset
+                    xv = 33.0 + hinge_set_offset
+                else:
+                    xc = dW - 23.5 - hinge_set_offset
+                    xv = dW - 33.0 - hinge_set_offset
                 for y in y_h:
                     holes_p.append({'type': 'tourillon', 'x': xc, 'y': y, 'diam_str': "⌀35"})
                     holes_p.append({'type': 'vis', 'x': xv, 'y': y + 22.5, 'diam_str': "⌀8"})
