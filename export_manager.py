@@ -1334,7 +1334,8 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
 
                         title_right = f"Porte (C{cab_idx}) - Variante Droite"
                         y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
-                        holes_p_right = _build_door_face_holes(dW_half, y_h_right, hinge_side='right')
+                        # Keep cups on the same panel side as the left variant; only Y distribution is mirrored.
+                        holes_p_right = _build_door_face_holes(dW_half, y_h_right, hinge_side='left')
                         plans.append((title_right, dW_half, dH, dp['door_thickness'], c_p, holes_p_right, [], [], None))
                         plan_quantities[title_right] = 1
                     else:
@@ -2029,7 +2030,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
 
                     title_right = f"Porte (C{cab_idx}) - Variante Droite"
                     y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
-                    holes_right = _build_door_face_holes(dW, y_h_right, hinge_side='right')
+                    # Keep cups on the same panel side as the left variant; only Y distribution is mirrored.
+                    holes_right = _build_door_face_holes(dW, y_h_right, hinge_side='left')
                     fig_right = draw_machining_view_pro_final(
                         title_right, dW, dH, dp.get('door_thickness', 19.0),
                         st.session_state.unit_select, proj, c_fa, holes_right, [], [], None, False
