@@ -69,6 +69,19 @@ def _hinge_centers_y(doc, plan_index, plan_width):
     return sorted(set(ys))
 
 
+def _hinge_centers_x(doc, plan_index, plan_width):
+    """Return sorted X centers (relative to plan origin) for hinge cups."""
+    x0, x1 = _plan_x_bounds(plan_index, plan_width)
+    xs = []
+    for entity in doc.modelspace().query("CIRCLE"):
+        if abs(float(entity.dxf.radius) - 17.5) > 1e-6:
+            continue
+        x, _y, _ = entity.dxf.center
+        if (x0 - 1.0) <= x <= (x1 + 1.0):
+            xs.append(round(float(x - x0), 1))
+    return sorted(set(xs))
+
+
 def _assert_equal_spacings(ys):
     assert len(ys) >= 2, f"Need at least 2 hinges, got {ys}"
     diffs = [round(ys[i + 1] - ys[i], 1) for i in range(len(ys) - 1)]
@@ -87,12 +100,16 @@ def check_double_cachepied_variants():
     # Plan order: Tb, Th, Mg, Md, F, Door-left, Door-right
     ys_left = _hinge_centers_y(doc, plan_index=5, plan_width=dW)
     ys_right = _hinge_centers_y(doc, plan_index=6, plan_width=dW)
+    xs_left = _hinge_centers_x(doc, plan_index=5, plan_width=dW)
+    xs_right = _hinge_centers_x(doc, plan_index=6, plan_width=dW)
 
     # Base default positions for dH=808 are [100, 404, 708]
     # Left variant (edge min offset +80): [180, 444, 708]
     # Right variant (edge max offset +80): [100, 364, 628]
     assert ys_left == [580.0, 844.0, 1108.0], f"Unexpected left variant hinge Y centers: {ys_left}"
     assert ys_right == [500.0, 764.0, 1028.0], f"Unexpected right variant hinge Y centers: {ys_right}"
+    assert xs_left == [23.5], f"Unexpected left variant hinge X centers: {xs_left}"
+    assert xs_right == [23.5], f"Unexpected right variant hinge X centers: {xs_right}"
 
     _assert_equal_spacings(ys_left)
     _assert_equal_spacings(ys_right)
