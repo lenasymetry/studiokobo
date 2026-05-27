@@ -413,6 +413,53 @@ def _render_exports(all_parts):
     else:
         st.caption("Le comptage n'est lancé qu'au clic sur le bouton ci-dessus.")
 
+    st.markdown("---")
+    st.subheader("Prévisualisation portes doubles cache-pieds")
+    scene = st.session_state.get('scene_cabinets', [])
+    selected_idx = st.session_state.get('selected_cabinet_index', 0)
+    selected_cab = scene[selected_idx] if scene and 0 <= selected_idx < len(scene) else None
+    selected_door_props = (selected_cab or {}).get('door_props', {})
+    has_target_double_cachepied = bool(
+        selected_door_props.get('has_door')
+        and selected_door_props.get('door_type') == 'double'
+        and selected_door_props.get('door_model') == 'floor_length'
+    )
+
+    if has_target_double_cachepied:
+        if st.button("👁️ Générer l'aperçu (2 feuilles porte double)", key="btn_preview_double_cachepied", use_container_width=True):
+            with st.spinner("Génération des 2 feuilles d'usinage porte double cache-pieds..."):
+                from export_manager import get_all_machining_plans_figures
+
+                preview_result = get_all_machining_plans_figures([selected_cab], [selected_idx + 1])
+                preview_figures = preview_result[0] if isinstance(preview_result, tuple) else preview_result
+                filtered_titles = {
+                    f"Porte (C{selected_idx + 1}) - Variante Gauche",
+                    f"Porte (C{selected_idx + 1}) - Variante Droite",
+                }
+                door_variant_figures = [
+                    (title, fig)
+                    for title, fig in preview_figures
+                    if title in filtered_titles
+                ]
+                st.session_state['double_cachepied_preview_scene_json'] = current_scene_json
+                st.session_state['double_cachepied_preview_figures'] = door_variant_figures
+
+        preview_is_current = (
+            st.session_state.get('double_cachepied_preview_scene_json') == current_scene_json
+        )
+        if preview_is_current:
+            preview_figures = st.session_state.get('double_cachepied_preview_figures', [])
+            if preview_figures:
+                for title, fig in preview_figures:
+                    st.markdown(f"##### {title}")
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Aucune feuille variante porte n'a été trouvée pour ce caisson.")
+        else:
+            st.caption("Cliquez sur le bouton ci-dessus pour afficher les 2 feuilles d'usinage de la porte double cache-pieds du caisson sélectionné.")
+    else:
+        st.caption("Le caisson sélectionné n'est pas en porte double avec modèle cache-pieds.")
+
     if not already_generated:
         return
 
