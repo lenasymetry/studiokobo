@@ -433,8 +433,8 @@ def _render_exports(all_parts):
                 preview_result = get_all_machining_plans_figures([selected_cab], [selected_idx + 1])
                 preview_figures = preview_result[0] if isinstance(preview_result, tuple) else preview_result
                 filtered_titles = {
-                    f"Porte (C{selected_idx + 1}) - Variante Gauche",
-                    f"Porte (C{selected_idx + 1}) - Variante Droite",
+                    f"PORTE GAUCHE (C{selected_idx + 1})",
+                    f"PORTE DROITE (C{selected_idx + 1})",
                 }
                 door_variant_figures = [
                     (title, fig)
