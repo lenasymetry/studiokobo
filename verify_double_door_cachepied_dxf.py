@@ -92,8 +92,8 @@ def check_double_cachepied_variants():
     cab = _base_cabinet()
     txt, doc = _generate_doc(cab, idx=1)
 
-    assert "Porte (C1) - Variante Gauche" in txt, "Missing left variant sheet"
-    assert "Porte (C1) - Variante Droite" in txt, "Missing right variant sheet"
+    assert "PORTE GAUCHE (C1)" in txt, "Missing left variant sheet"
+    assert "PORTE DROITE (C1)" in txt, "Missing right variant sheet"
 
     dW = (cab["dims"]["L_raw"] - 2.0 * cab["door_props"]["door_gap"]) / 2.0
 
