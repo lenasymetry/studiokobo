@@ -234,6 +234,18 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
     holes_drawn = []  # [(x, y, diam), ...]
     validation_errors = []  # Collect any mismatches to log (non-blocking for now)
 
+    def _to_float(val, default=None):
+        try:
+            if val is None:
+                return default
+            if isinstance(val, str):
+                val = val.replace(',', '.').strip()
+                if val == '':
+                    return default
+            return float(val)
+        except Exception:
+            return default
+
     margin = 400.0
     tranche_thick = max(Tp * 1.5, 30.0)
 
@@ -291,8 +303,12 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
     # === FACE HOLES (fh) - drawn in XY on the front face ===
     for hole in fh or []:
         try:
-            hx = x0 + float(hole.get('x', 0.0))
-            hy = y0 + float(hole.get('y', 0.0))
+            local_x = _to_float(hole.get('x'), None)
+            local_y = _to_float(hole.get('y'), None)
+            if local_x is None or local_y is None:
+                continue
+            hx = x0 + local_x
+            hy = y0 + local_y
             if hx < x0 or hx > x1 or hy < y0 or hy > y1:
                 continue
             
@@ -318,7 +334,13 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
     # === SIDE EDGE HOLES (t_cote_h) - drawn on left and right edges ===
     for hole in t_cote_h or []:
         try:
-            hy = y0 + float(hole.get('y', 0.0))
+            # Certaines sources publient la coordonnee verticale en 'x' au lieu de 'y'.
+            local_y = _to_float(hole.get('y'), None)
+            if local_y is None:
+                local_y = _to_float(hole.get('x'), None)
+            if local_y is None:
+                continue
+            hy = y0 + local_y
             if hy < y0 or hy > y1:
                 continue
             
@@ -345,8 +367,12 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
     # === TOP/BOTTOM EDGE HOLES (t_long_h) - drawn on top and bottom edges ===
     for hole in t_long_h or []:
         try:
-            # NOTE: For top/bottom edges, 'y' in the hole dict contains X position
-            hole_x_coord = float(hole.get('y', 0.0))
+            # Compatibilite: selon les producteurs, la coordonnee peut etre en 'x' ou 'y'.
+            hole_x_coord = _to_float(hole.get('x'), None)
+            if hole_x_coord is None:
+                hole_x_coord = _to_float(hole.get('y'), None)
+            if hole_x_coord is None:
+                continue
             hx = x0 + hole_x_coord
             if hx < x0 or hx > x1:
                 continue
