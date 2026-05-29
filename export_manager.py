@@ -304,13 +304,8 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             holes_drawn_count += 1
             
             msp.add_circle((hx, hy), radius=radius, dxfattribs={"layer": "TROUS"})
-            if 'vis' in hole.get('type', '').lower():
-                try:
-                    hatch = msp.add_hatch(color=256, dxfattribs={"layer": "TROUS"})
-                    hatch.paths.add_edge_path()
-                    hatch.paths[-1].add_arc((hx, hy), radius=radius, start_angle=0, end_angle=360)
-                except:
-                    pass
+            # Important AutoCAD: garder les trous en entites CIRCLE pures
+            # pour garantir l'accrochage "centre" sur chaque perçage.
             
             if diam_str not in annotated_diams:
                 diam_autocad = _convert_diameter_string_autocad(diam_str)
@@ -338,13 +333,6 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                 holes_drawn_count += 1
                 
                 msp.add_circle((tx, hy), radius=radius, dxfattribs={"layer": "TROUS"})
-                if 'vis' in hole.get('type', '').lower():
-                    try:
-                        hatch = msp.add_hatch(color=256, dxfattribs={"layer": "TROUS"})
-                        hatch.paths.add_edge_path()
-                        hatch.paths[-1].add_arc((tx, hy), radius=radius, start_angle=0, end_angle=360)
-                    except:
-                        pass
             
             if diam_str not in annotated_diams:
                 diam_autocad = _convert_diameter_string_autocad(diam_str)
@@ -374,13 +362,6 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                 holes_drawn_count += 1
                 
                 msp.add_circle((hx, ty), radius=radius, dxfattribs={"layer": "TROUS"})
-                if 'vis' in hole.get('type', '').lower():
-                    try:
-                        hatch = msp.add_hatch(color=256, dxfattribs={"layer": "TROUS"})
-                        hatch.paths.add_edge_path()
-                        hatch.paths[-1].add_arc((hx, ty), radius=radius, start_angle=0, end_angle=360)
-                    except:
-                        pass
         except:
             continue
     
