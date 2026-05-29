@@ -801,6 +801,22 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             align-items: center;
             overflow: hidden;
         }
+        .sheet-figure-wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .sheet-figure-rotatable {
+            width: 100%;
+            height: 100%;
+            transform-origin: center center;
+            transform: rotate(0deg) scale(1);
+            transition: transform 180ms ease-out;
+            will-change: transform;
+        }
         @media print {
             body { background: white; }
             .page-container {
@@ -1416,7 +1432,15 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 else:
                     # Pour HTML : utiliser le HTML interactif de Plotly
                     html_fig = fig.to_html(include_plotlyjs=False, full_html=False, config={'staticPlot': True})
-                    full_html += f'<div class="page-container">{html_fig}</div>'
+                    full_html += (
+                        '<div class="page-container">'
+                        '<div class="sheet-figure-wrapper">'
+                        '<div class="sheet-figure-rotatable" data-rotation-deg="0">'
+                        f'{html_fig}'
+                        '</div>'
+                        '</div>'
+                        '</div>'
+                    )
         
         # === VALIDATION STRICTE POUR DXF ===
         if output_format == 'dxf':
@@ -1528,6 +1552,57 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
 
         if output_format == 'figures':
             return figures_out, True
+
+        if output_format == 'html':
+            full_html += """
+<script>
+(function () {
+    const DOUBLE_CLICK_MS = 350;
+
+    function applyRotation(element, degrees) {
+        const normalized = ((degrees % 360) + 360) % 360;
+        const quarterTurn = (normalized % 180) !== 0;
+        const scale = quarterTurn ? 0.74 : 1.0;
+        element.style.transform = `rotate(${normalized}deg) scale(${scale})`;
+    }
+
+    function bindSheetRotation(rotatable) {
+        if (!rotatable || rotatable.dataset.rotationBound === "1") {
+            return;
+        }
+        rotatable.dataset.rotationBound = "1";
+
+        let lastMiddleDownTs = 0;
+
+        rotatable.addEventListener("mousedown", function (event) {
+            if (event.button !== 1) {
+                return;
+            }
+
+            event.preventDefault();
+            const now = Date.now();
+            if (now - lastMiddleDownTs <= DOUBLE_CLICK_MS) {
+                const current = parseInt(rotatable.dataset.rotationDeg || "0", 10) || 0;
+                const next = (current + 90) % 360;
+                rotatable.dataset.rotationDeg = String(next);
+                applyRotation(rotatable, next);
+                lastMiddleDownTs = 0;
+                return;
+            }
+            lastMiddleDownTs = now;
+        });
+
+        rotatable.addEventListener("auxclick", function (event) {
+            if (event.button === 1) {
+                event.preventDefault();
+            }
+        });
+    }
+
+    document.querySelectorAll(".sheet-figure-rotatable").forEach(bindSheetRotation);
+})();
+</script>
+"""
 
         full_html += '</body></html>'
         return full_html.encode('utf-8'), True
