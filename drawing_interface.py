@@ -1698,8 +1698,9 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
         draw_triangle(L_actual/2, 0, filled=False, orientation='down')
     
     elif "panneau arrière" in panel_lower or ("fond" in panel_lower and "tiroir" not in panel_lower):
-        # Triangle vide au milieu du bord inférieur (y=0) - exactement comme pour la porte
-        draw_triangle(L_actual/2, 0, filled=False, orientation='down')
+        # Les panneaux arrière n'affichent pas de repère triangulaire pour éviter
+        # d'élargir inutilement le cadrage de la feuille d'usinage.
+        pass
 
     if center_cutout_props:
         cutout_type = str(center_cutout_props.get('type', 'integrated_cutout'))
@@ -4875,3 +4876,4 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
         showlegend=False
     )
     return fig
+
