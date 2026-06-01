@@ -1149,9 +1149,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         
                         # Trous de liaison dans la tranche de l'étagère fixe
                         # Regle: uniquement des tourillons, avec extremites a 25 mm de chaque bord
-                        # sur la profondeur reelle de l'etagere (W_raw - 10).
+                        # sur la profondeur reelle de l'etagere fixe (identique traverse: W_raw).
                         tr = []
-                        shelf_width = float(W_raw - 10.0)
+                        shelf_width = float(W_raw)
                         _, ys_dowel_shelf = calculate_hole_positions(shelf_width)
                         for y_pos in ys_dowel_shelf:
                             tr.append({'type':'tourillon','x':s_th/2,'y':y_pos,'diam_str':"⌀8/22"})
@@ -1203,8 +1203,11 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         fixed_shelf_tr_draw[s_idx] = []
                         # Pour les étagères mobiles, L_shelf est déjà défini à la ligne 240
                     
-                    # W_shelf est commun à toutes les étagères
-                    W_shelf = float(W_raw - 10.0)
+                    # W_shelf: étagère fixe = même largeur que traverse, mobile = largeur réduite.
+                    if s_type == 'fixe':
+                        W_shelf = float(W_raw)
+                    else:
+                        W_shelf = float(W_raw - 10.0)
                     c_shelf = {"Chant Avant":True, "Chant Arrière":False, "Chant Gauche":False, "Chant Droit":False}
                     th_shelf = fixed_shelf_tr_draw.get(s_idx, [])
                     # Créer une clé unique pour regrouper les étagères identiques
@@ -2243,8 +2246,14 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
             shelf_groups = {}
             for s in shelves_list:
                 if s.get('enabled', True):
-                    s_L = s.get('L_shelf', L_trav)
-                    s_W = s.get('W_shelf', W_raw)
+                    s_type = s.get('shelf_type', 'mobile')
+                    if s_type == 'fixe':
+                        # Exigence atelier: étagère fixe = mêmes dimensions que traverses.
+                        s_L = float(L_trav)
+                        s_W = float(W_raw)
+                    else:
+                        s_L = s.get('L_shelf', L_trav)
+                        s_W = s.get('W_shelf', W_raw)
                     s_T = s.get('thickness', 19.0)
                     th_shelf = []
                     shelf_key = (s_L, s_W, s_T, tuple(map(tuple, th_shelf)))
