@@ -231,7 +231,8 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
     t_cote_h = t_cote_h or []
     
     # === VALIDATION: Track all holes to ensure they match Streamlit ===
-    holes_drawn = []  # [(x, y, diam), ...]
+    # Keep world and local coordinates so dimensions can be attached to actual hole centers.
+    holes_drawn = []
     validation_errors = []  # Collect any mismatches to log (non-blocking for now)
 
     def _to_float(val, default=None):
@@ -316,7 +317,14 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             diam = _extract_diameter_from_string(diam_str, default_value=5.0)
             radius = max(0.8, diam / 2.0)
             
-            holes_drawn.append((round(hx - x0, 1), round(hy - y0, 1), diam))
+            holes_drawn.append({
+                "zone": "FACE",
+                "world_x": hx,
+                "world_y": hy,
+                "local_x": hx - x0,
+                "local_y": hy - y0,
+                "diam": diam,
+            })
             holes_drawn_count += 1
             
             msp.add_circle((hx, hy), radius=radius, dxfattribs={"layer": "TROUS"})
@@ -350,8 +358,15 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             tranche_offset = max(12.0, Tp / 2.0)
             
             # Draw on BOTH side edges (left and right)
-            for tx in [tg_x0 + tranche_offset, td_x0 + tranche_offset]:
-                holes_drawn.append((round(tx - x0, 1), round(hy - y0, 1), diam, "SIDE"))
+            for side_name, tx in [("SIDE_LEFT", tg_x0 + tranche_offset), ("SIDE_RIGHT", td_x0 + tranche_offset)]:
+                holes_drawn.append({
+                    "zone": side_name,
+                    "world_x": tx,
+                    "world_y": hy,
+                    "local_x": tx - x0,
+                    "local_y": hy - y0,
+                    "diam": diam,
+                })
                 holes_drawn_count += 1
                 
                 msp.add_circle((tx, hy), radius=radius, dxfattribs={"layer": "TROUS"})
@@ -383,8 +398,15 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             tranche_offset = max(12.0, Tp / 2.0)
             
             # Draw on BOTH top and bottom edges
-            for ty in [tb_y0 - tranche_offset, th_y0 + tranche_offset]:
-                holes_drawn.append((round(hx - x0, 1), round(ty - y0, 1), diam, "TOPBOTTOM"))
+            for zone_name, ty in [("EDGE_BOTTOM", tb_y0 - tranche_offset), ("EDGE_TOP", th_y0 + tranche_offset)]:
+                holes_drawn.append({
+                    "zone": zone_name,
+                    "world_x": hx,
+                    "world_y": ty,
+                    "local_x": hx - x0,
+                    "local_y": ty - y0,
+                    "diam": diam,
+                })
                 holes_drawn_count += 1
                 
                 msp.add_circle((hx, ty), radius=radius, dxfattribs={"layer": "TROUS"})
@@ -400,26 +422,44 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
     _add_linear_dimension_dxf(msp, base=(x0, y0 - 80.0), p1=(x0, y0), p2=(x1, y0), angle=0, layer="COTES")
     _add_linear_dimension_dxf(msp, base=(x0 - 80.0, y0), p1=(x0, y0), p2=(x0, y1), angle=90, layer="COTES")
 
-    hole_x_positions = sorted({round(float(h.get('x', 0.0)), 1) for h in (fh or []) if isinstance(h, dict) and 'x' in h and 0.0 <= h.get('x', -1) <= Lp})
-    hole_y_positions = sorted({round(float(h.get('y', 0.0)), 1) for h in (fh or []) if isinstance(h, dict) and 'y' in h and 0.0 <= h.get('y', -1) <= Wp})
+    # Face-hole dimensions are computed from circles actually drawn in DXF,
+    # which avoids mismatches when source hole dicts contain mixed x/y conventions.
+    face_holes = [h for h in holes_drawn if h.get("zone") == "FACE"]
+    hole_x_positions = sorted({round(float(h["local_x"]), 1) for h in face_holes})
+    hole_y_positions = sorted({round(float(h["local_y"]), 1) for h in face_holes})
+
+    x_to_ref_y = {}
+    for hx in hole_x_positions:
+        y_candidates = [float(h["local_y"]) for h in face_holes if abs(float(h["local_x"]) - hx) <= 0.11]
+        if y_candidates:
+            x_to_ref_y[hx] = min(y_candidates)
+
+    y_to_ref_x = {}
+    for hy in hole_y_positions:
+        x_candidates = [float(h["local_x"]) for h in face_holes if abs(float(h["local_y"]) - hy) <= 0.11]
+        if x_candidates:
+            y_to_ref_x[hy] = min(x_candidates)
 
     for idx, hx in enumerate(hole_x_positions):
+        ref_y = y0 + x_to_ref_y.get(hx, 0.0)
         base_y = y0 - 180.0 - (idx * 50.0)
-        _add_linear_dimension_dxf(msp, base=(x0, base_y), p1=(x0, y0), p2=(x0 + hx, y0), angle=0, layer="COTES")
+        _add_linear_dimension_dxf(msp, base=(x0, base_y), p1=(x0, ref_y), p2=(x0 + hx, ref_y), angle=0, layer="COTES")
 
     for idx, hy in enumerate(hole_y_positions):
+        ref_x = x0 + y_to_ref_x.get(hy, 0.0)
         base_x = x0 - 180.0 - (idx * 50.0)
-        _add_linear_dimension_dxf(msp, base=(base_x, y0), p1=(x0, y0), p2=(x0, y0 + hy), angle=90, layer="COTES")
+        _add_linear_dimension_dxf(msp, base=(base_x, y0), p1=(ref_x, y0), p2=(ref_x, y0 + hy), angle=90, layer="COTES")
 
     for i in range(len(hole_x_positions) - 1):
         x_start = hole_x_positions[i]
         x_end = hole_x_positions[i + 1]
+        ref_y = y0 + min(x_to_ref_y.get(x_start, 0.0), x_to_ref_y.get(x_end, 0.0))
         base_y_inter = y0 - 280.0 - (i * 35.0)
         _add_linear_dimension_dxf(
             msp,
             base=(x0 + x_start, base_y_inter),
-            p1=(x0 + x_start, y0),
-            p2=(x0 + x_end, y0),
+            p1=(x0 + x_start, ref_y),
+            p2=(x0 + x_end, ref_y),
             angle=0,
             layer="COTES_INTER",
         )
@@ -427,13 +467,53 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
     for i in range(len(hole_y_positions) - 1):
         y_start = hole_y_positions[i]
         y_end = hole_y_positions[i + 1]
+        ref_x = x0 + min(y_to_ref_x.get(y_start, 0.0), y_to_ref_x.get(y_end, 0.0))
         base_x_inter = x0 - 280.0 - (i * 35.0)
         _add_linear_dimension_dxf(
             msp,
             base=(base_x_inter, y0 + y_start),
-            p1=(x0, y0 + y_start),
-            p2=(x0, y0 + y_end),
+            p1=(ref_x, y0 + y_start),
+            p2=(ref_x, y0 + y_end),
             angle=90,
+            layer="COTES_INTER",
+        )
+
+    # Extra center dimensions for edge holes (tourillons/vis on tranches).
+    side_holes = [h for h in holes_drawn if h.get("zone") in ("SIDE_LEFT", "SIDE_RIGHT")]
+    side_y_positions = sorted({round(float(h["world_y"]), 1) for h in side_holes if h.get("zone") == "SIDE_LEFT"})
+    for idx, hy in enumerate(side_y_positions):
+        base_x = tg_x1 - 180.0 - (idx * 40.0)
+        _add_linear_dimension_dxf(msp, base=(base_x, y0), p1=(tg_x1, y0), p2=(tg_x1, hy), angle=90, layer="COTES")
+
+    for i in range(len(side_y_positions) - 1):
+        y_start = side_y_positions[i]
+        y_end = side_y_positions[i + 1]
+        base_x_inter = tg_x1 - 280.0 - (i * 35.0)
+        _add_linear_dimension_dxf(
+            msp,
+            base=(base_x_inter, y_start),
+            p1=(tg_x1, y_start),
+            p2=(tg_x1, y_end),
+            angle=90,
+            layer="COTES_INTER",
+        )
+
+    edge_holes = [h for h in holes_drawn if h.get("zone") in ("EDGE_BOTTOM", "EDGE_TOP")]
+    edge_x_positions = sorted({round(float(h["world_x"]), 1) for h in edge_holes if h.get("zone") == "EDGE_BOTTOM"})
+    for idx, hx_world in enumerate(edge_x_positions):
+        base_y = tb_y1 - 120.0 - (idx * 40.0)
+        _add_linear_dimension_dxf(msp, base=(x0, base_y), p1=(x0, tb_y1), p2=(hx_world, tb_y1), angle=0, layer="COTES")
+
+    for i in range(len(edge_x_positions) - 1):
+        x_start = edge_x_positions[i]
+        x_end = edge_x_positions[i + 1]
+        base_y_inter = tb_y1 - 220.0 - (i * 35.0)
+        _add_linear_dimension_dxf(
+            msp,
+            base=(x_start, base_y_inter),
+            p1=(x_start, tb_y1),
+            p2=(x_end, tb_y1),
+            angle=0,
             layer="COTES_INTER",
         )
 
