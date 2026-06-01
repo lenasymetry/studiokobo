@@ -83,6 +83,44 @@ def _sanitize_dxf_doc(doc):
         except Exception:
             pass
 
+def _configure_dxf_editing_defaults(doc):
+    """Force des variables de dessin qui facilitent la cotation libre dans AutoCAD.
+
+    Objectif:
+    - permettre des cotes associatives (centres de CIRCLE, points d'accrochage),
+    - eviter une contrainte ortho imposee a l'ouverture du DXF,
+    - garder des accroches utiles (extremite/milieu/centre/intersection).
+    """
+    try:
+        # 2 = cotes associatives (les cotes restent liees a la geometrie)
+        doc.header["$DIMASSOC"] = 2
+    except Exception:
+        pass
+
+    try:
+        # 0 = pas de contrainte ortho imposee dans le fichier
+        doc.header["$ORTHOMODE"] = 0
+    except Exception:
+        pass
+
+    try:
+        # 0 = desactive l'accrochage grille force
+        if "$SNAPMODE" not in doc.header.varnames():
+            doc.header.custom_vars.append("$SNAPMODE", 0)
+        else:
+            doc.header["$SNAPMODE"] = 0
+    except Exception:
+        pass
+
+    try:
+        # END(1) + MID(2) + CEN(4) + INT(32) = 39
+        if "$OSMODE" not in doc.header.varnames():
+            doc.header.custom_vars.append("$OSMODE", 39)
+        else:
+            doc.header["$OSMODE"] = 39
+    except Exception:
+        pass
+
 def _add_linear_dimension_dxf(msp, base, p1, p2, angle, layer="COTES", text_override=None, dimstyle="COTATIONS_PRO"):
     """Ajoute une vraie dimension AutoCAD éditable avec l'outil COTE."""
     try:
@@ -478,6 +516,56 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             layer="COTES_INTER",
         )
 
+    # Cotes supplementaires par rangee/colonne pour eviter un ancrage unique
+    # sur la premiere ligne de reference.
+    face_rows = {}
+    face_cols = {}
+    for h in face_holes:
+        rx = round(float(h["local_x"]), 1)
+        ry = round(float(h["local_y"]), 1)
+        face_rows.setdefault(ry, set()).add(rx)
+        face_cols.setdefault(rx, set()).add(ry)
+
+    row_idx = 0
+    for ry in sorted(face_rows.keys()):
+        xs = sorted(face_rows[ry])
+        if len(xs) < 2:
+            continue
+        y_row = y0 + ry
+        base_y_row = y0 - 360.0 - (row_idx * 28.0)
+        row_idx += 1
+        for i in range(len(xs) - 1):
+            x_start = xs[i]
+            x_end = xs[i + 1]
+            _add_linear_dimension_dxf(
+                msp,
+                base=(x0 + x_start, base_y_row),
+                p1=(x0 + x_start, y_row),
+                p2=(x0 + x_end, y_row),
+                angle=0,
+                layer="COTES_INTER",
+            )
+
+    col_idx = 0
+    for rx in sorted(face_cols.keys()):
+        ys = sorted(face_cols[rx])
+        if len(ys) < 2:
+            continue
+        x_col = x0 + rx
+        base_x_col = x0 - 360.0 - (col_idx * 28.0)
+        col_idx += 1
+        for i in range(len(ys) - 1):
+            y_start = ys[i]
+            y_end = ys[i + 1]
+            _add_linear_dimension_dxf(
+                msp,
+                base=(base_x_col, y0 + y_start),
+                p1=(x_col, y0 + y_start),
+                p2=(x_col, y0 + y_end),
+                angle=90,
+                layer="COTES_INTER",
+            )
+
     # Extra center dimensions for edge holes (tourillons/vis on tranches).
     side_holes = [h for h in holes_drawn if h.get("zone") in ("SIDE_LEFT", "SIDE_RIGHT")]
     side_y_positions = sorted({round(float(h["world_y"]), 1) for h in side_holes if h.get("zone") == "SIDE_LEFT"})
@@ -760,6 +848,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             return b"Le module 'ezdxf' est requis pour l'export AutoCAD.", False
         dxf_doc = ezdxf.new('R2010')
         dxf_doc.units = 4
+        _configure_dxf_editing_defaults(dxf_doc)
         for layer_name, color in [
             ('PANNEAU', 7),
             ('TROUS', 2),
