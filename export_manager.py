@@ -258,6 +258,13 @@ def _add_tranche_dxf(msp, x_coords, y_coords, Tp, layer="TRANCHES"):
     poly_pts.append(poly_pts[0])
     msp.add_lwpolyline(poly_pts, dxfattribs={"layer": layer})
 
+def _add_snap_point_dxf(msp, x, y, layer="AIDE_COTATION"):
+    """Ajoute un point d'accrochage (NODE) pour faciliter les cotes manuelles."""
+    try:
+        msp.add_point((float(x), float(y)), dxfattribs={"layer": layer, "color": 8})
+    except Exception:
+        pass
+
 def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_plan, origin_x=0.0, origin_y=0.0, ch=None, has_rebate=False):
     Lp = float(Lp)
     Wp = float(Wp)
@@ -366,6 +373,7 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
             holes_drawn_count += 1
             
             msp.add_circle((hx, hy), radius=radius, dxfattribs={"layer": "TROUS"})
+            _add_snap_point_dxf(msp, hx, hy)
             # Important AutoCAD: garder les trous en entites CIRCLE pures
             # pour garantir l'accrochage "centre" sur chaque perçage.
             
@@ -408,6 +416,7 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                 holes_drawn_count += 1
                 
                 msp.add_circle((tx, hy), radius=radius, dxfattribs={"layer": "TROUS"})
+                _add_snap_point_dxf(msp, tx, hy)
             
             if diam_str not in annotated_diams:
                 diam_autocad = _convert_diameter_string_autocad(diam_str)
@@ -448,6 +457,7 @@ def _add_plan_to_dxf(msp, title, Lp, Wp, Tp, fh, t_long_h, t_cote_h, proj_for_pl
                 holes_drawn_count += 1
                 
                 msp.add_circle((hx, ty), radius=radius, dxfattribs={"layer": "TROUS"})
+                _add_snap_point_dxf(msp, hx, ty)
         except:
             continue
     
@@ -859,10 +869,16 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             ('CARTOUCHE', 7),
             ('LEGENDE', 7),
             ('REPERAGE', 1),
+            ('AIDE_COTATION', 8),
             ('FEUILLURE', 1),
         ]:
             if layer_name not in dxf_doc.layers:
                 dxf_doc.layers.new(layer_name, dxfattribs={'color': color})
+        try:
+            # Calque utilitaire pour l'accrochage, non imprime.
+            dxf_doc.layers.get('AIDE_COTATION').dxf.plot = 0
+        except Exception:
+            pass
         try:
             if 'COTATIONS_PRO' not in dxf_doc.dimstyles:
                 dimstyle = dxf_doc.dimstyles.new('COTATIONS_PRO')
@@ -1097,8 +1113,8 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                         if zone_x_min is not None and zone_x_max is not None:
                             # Montant gauche principal si la zone commence au montant gauche
                             if abs(zone_x_min - t_lr) < 1.0:
-                                for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x+10.0,'y':yc_val,'diam_str':"⌀3"})
-                                for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x+10.0,'y':yc_val,'diam_str':"⌀8/10"})
+                                for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
+                                for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                             # Montant droit principal si la zone se termine au montant droit
                             if abs(zone_x_max - (L_raw - t_lr)) < 1.0:
                                 for x in ys_vis_sf: holes_md.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
@@ -1126,8 +1142,8 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                                         divider_element_holes_right[div_idx].append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                         else:
                             # Étagère sur tout le caisson : trous sur les deux montants principaux
-                            for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x+10.0,'y':yc_val,'diam_str':"⌀3"})
-                            for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x+10.0,'y':yc_val,'diam_str':"⌀8/10"})
+                            for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
+                            for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                             for x in ys_vis_sf: holes_md.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
                             for x in ys_dowel_sf: holes_md.append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                         
@@ -1900,8 +1916,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                     
                     if zone_x_min is not None and zone_x_max is not None:
                         if abs(zone_x_min - t_lr) < 1.0:
-                            for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x+10.0,'y':yc_val,'diam_str':"⌀3"})
-                            for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x+10.0,'y':yc_val,'diam_str':"⌀8/10"})
+                            for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
+                            for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                         if abs(zone_x_max - (L_raw - t_lr)) < 1.0:
                             for x in ys_vis_sf: holes_md.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
                             for x in ys_dowel_sf: holes_md.append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
@@ -1917,17 +1933,17 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                             
                             if touches_left_face:
                                 for x in ys_vis_sf:
-                                    divider_element_holes_left[div_idx].append({'type':'vis','x':x+10.0,'y':yc_val,'diam_str':"⌀3"})
+                                    divider_element_holes_left[div_idx].append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
                                 for x in ys_dowel_sf:
-                                    divider_element_holes_left[div_idx].append({'type':'tourillon','x':x+10.0,'y':yc_val,'diam_str':"⌀8/10"})
+                                    divider_element_holes_left[div_idx].append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                             if touches_right_face:
                                 for x in ys_vis_sf:
                                     divider_element_holes_right[div_idx].append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
                                 for x in ys_dowel_sf:
                                     divider_element_holes_right[div_idx].append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                     else:
-                        for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x+10.0,'y':yc_val,'diam_str':"⌀3"})
-                        for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x+10.0,'y':yc_val,'diam_str':"⌀8/10"})
+                        for x in ys_vis_sf: holes_mg.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
+                        for x in ys_dowel_sf: holes_mg.append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
                         for x in ys_vis_sf: holes_md.append({'type':'vis','x':x,'y':yc_val,'diam_str':"⌀3"})
                         for x in ys_dowel_sf: holes_md.append({'type':'tourillon','x':x,'y':yc_val,'diam_str':"⌀8/10"})
         
