@@ -1530,8 +1530,9 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
     else:
         # Comportement standard pour les autres éléments
         # Cotations verticales (gauche et droite) - à l'extérieur (offset négatif pour axis='y')
-        add_pro_dimension(fig, L_actual+20, y_tb_0, L_actual+20, y_tb_1, format_number_no_decimal(T), -offset_epaisseur, axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
-        add_pro_dimension(fig, L_actual+20, y_th_0, L_actual+20, y_th_1, format_number_no_decimal(T), -offset_epaisseur, axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
+        # Décalage +19mm vers la droite pour sortir les cotes hors du rectangle fermé des tranches avant/arrière
+        add_pro_dimension(fig, L_actual+20, y_tb_0, L_actual+20, y_tb_1, format_number_no_decimal(T), -(offset_epaisseur - 19), axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
+        add_pro_dimension(fig, L_actual+20, y_th_0, L_actual+20, y_th_1, format_number_no_decimal(T), -(offset_epaisseur - 19), axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
         
         # Cotations horizontales (haut et bas) - à l'extérieur (offset positif pour axis='x')
         add_pro_dimension(fig, x_tg_0, W_actual+20, x_tg_1, W_actual+20, format_number_no_decimal(T), offset_epaisseur, axis='x', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual)
@@ -4196,14 +4197,16 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
                     # Réduire l'offset pour rapprocher la cotation 9.5 de la tranche et laisser un espace avec le 19
                     offset_base = offset_epaisseur if not is_montant_or_porte_rotated else offset_tranche_hb
                     offset_t2 = offset_base - 20  # Réduire de 20mm pour rapprocher de la tranche
-                    add_pro_dimension(fig, x_ref, y_bord_bas, x_ref, y_tb_center, format_number_no_decimal(dist_rebord), -offset_t2, axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
-                    
+                    # +19mm vers la droite pour sortir les cotes T/2 hors du rectangle fermé des tranches avant/arrière
+                    add_pro_dimension(fig, x_ref, y_bord_bas, x_ref, y_tb_center, format_number_no_decimal(dist_rebord), -(offset_t2 - 19), axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
+
                     # Pour la tranche haut : cotation verticale depuis le bord haut de l'épaisseur jusqu'au centre du trou
                     y_th_center = (y_th_0 + y_th_1) / 2
                     y_bord_haut = y_th_0  # Bord haut de l'épaisseur
-                    
+
                     # Utiliser add_pro_dimension avec le même style que l'épaisseur des tranches
-                    add_pro_dimension(fig, x_ref, y_bord_haut, x_ref, y_th_center, format_number_no_decimal(dist_rebord), -offset_t2, axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
+                    # +19mm vers la droite pour sortir les cotes T/2 hors du rectangle fermé des tranches avant/arrière
+                    add_pro_dimension(fig, x_ref, y_bord_haut, x_ref, y_th_center, format_number_no_decimal(dist_rebord), -(offset_t2 - 19), axis='y', xanchor='center', yanchor='middle', rotate_coords_fn=rotate_coords if needs_rotation else None, cascade_tracker=cascade_tracker, panel_bounds=panel_bounds, panel_L=L_actual, panel_W=W_actual, panel_name=panel_name)
 
     # --- TROUS DE TRANCHE (Traverses & Etagères Fixes) ---
     # Pour les traverses : traits pointillés depuis chaque trou vers la ligne de cotation,
