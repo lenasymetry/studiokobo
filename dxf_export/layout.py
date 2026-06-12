@@ -66,13 +66,6 @@ def setup_layout_with_viewport(
         dxfattribs={"layer": "VIEWPORTS"},
     )
 
-    # verrouille le viewport (bit 0x4000)
-    try:
-        flags = int(getattr(viewport.dxf, "flags", 0) or 0)
-        viewport.dxf.flags = flags | 0x4000
-    except Exception:
-        pass
-
     return layout, viewport
 
 
@@ -142,12 +135,6 @@ def setup_layout_with_viewport_excluding_titleblock(
         dxfattribs={"layer": "VIEWPORTS"},
     )
 
-    try:
-        flags = int(getattr(viewport.dxf, "flags", 0) or 0)
-        viewport.dxf.flags = flags | 0x4000
-    except Exception:
-        pass
-
     return layout, viewport, {
         "draw_zone": {
             "left": float(margin_mm),
@@ -199,13 +186,6 @@ def fit_viewport_to_bbox(
 
     viewport.dxf.view_center_point = (cx, cy)
     viewport.dxf.view_height = view_h
-
-    # relock viewport
-    try:
-        flags = int(getattr(viewport.dxf, "flags", 0) or 0)
-        viewport.dxf.flags = flags | 0x4000
-    except Exception:
-        pass
 
     return {
         "view_center": (cx, cy),
