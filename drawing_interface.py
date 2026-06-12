@@ -621,12 +621,16 @@ def add_pro_dimension(fig, x0, y0, x1, y1, text_val, offset_dist, axis='x', colo
             _annotation_tracker.add(annotation_key)
 
         side = "top" if offset_dist > 0 else "bottom"
+        # Pour que le rendu DXF place la ligne de cote exactement à y_dim (comme Plotly),
+        # on stocke p1/p2 avec y = y_dim - offset_dist, de sorte que :
+        # DXF : max(p1.y, p2.y) + offset = (y_dim - offset_dist) + abs(offset_dist) = y_dim
+        dxf_ref_y = y_dim - offset_dist
         _push_dxf_dimension(
             fig,
             {
                 "axis": "x",
-                "p1": (float(x0), float(y0)),
-                "p2": (float(x1), float(y1)),
+                "p1": (float(x0), float(dxf_ref_y)),
+                "p2": (float(x1), float(dxf_ref_y)),
                 "offset": float(abs(offset_dist)),
                 "side": side,
                 "text": str(text_val),
