@@ -1314,6 +1314,93 @@ def _add_hole_leaders_with_depth(scene: Scene, figure_name: str = ""):
 
 
 
+def _push_dimensions_outside_closed_surfaces(scene: Scene) -> None:
+    """Déplace les lignes de cote pour qu'elles ne tombent pas à l'intérieur des surfaces fermées."""
+    closed_rects = []
+    for ent in scene.entities:
+        if not isinstance(ent, Polyline):
+            continue
+        pts = list(ent.points or [])
+        is_closed_poly = ent.closed or (
+            len(pts) >= 4
+            and abs(pts[0][0] - pts[-1][0]) <= 1e-3
+            and abs(pts[0][1] - pts[-1][1]) <= 1e-3
+        )
+        if not is_closed_poly:
+            continue
+        rect = _rect_from_polyline(pts)
+        if rect is None:
+            continue
+        if (rect[2] - rect[0]) < 5.0 or (rect[3] - rect[1]) < 5.0:
+            continue
+        closed_rects.append(rect)
+
+    if not closed_rects:
+        return
+
+    MIN_GAP = 8.0
+
+    for ent in scene.entities:
+        if not isinstance(ent, Dimension):
+            continue
+
+        x1, y1 = float(ent.p1[0]), float(ent.p1[1])
+        x2, y2 = float(ent.p2[0]), float(ent.p2[1])
+        axis = (ent.axis or "auto").lower()
+        if axis == "auto":
+            axis = "x" if abs(y2 - y1) <= abs(x2 - x1) else "y"
+        side = (ent.side or "").lower()
+        offset = max(0.0, float(ent.offset))
+
+        if axis == "y":
+            x_dim = (min(x1, x2) - offset) if side == "left" else (max(x1, x2) + offset)
+            y_lo, y_hi = min(y1, y2), max(y1, y2)
+            overlapping = [
+                r for r in closed_rects
+                if r[0] < x_dim < r[2] and not (y_hi < r[1] or y_lo > r[3])
+            ]
+            if not overlapping:
+                continue
+            x_safe_l = min(r[0] for r in overlapping) - MIN_GAP
+            x_safe_r = max(r[2] for r in overlapping) + MIN_GAP
+            off_l = min(x1, x2) - x_safe_l
+            off_r = x_safe_r - max(x1, x2)
+            opts = []
+            if off_l > 0:
+                opts.append(("left", off_l))
+            if off_r > 0:
+                opts.append(("right", off_r))
+            if not opts:
+                opts = [("left", abs(min(x1, x2) - x_safe_l))]
+            best_side, best_off = min(opts, key=lambda o: o[1])
+            ent.side = best_side
+            ent.offset = best_off
+
+        elif axis == "x":
+            y_dim = (min(y1, y2) - offset) if side == "bottom" else (max(y1, y2) + offset)
+            x_lo, x_hi = min(x1, x2), max(x1, x2)
+            overlapping = [
+                r for r in closed_rects
+                if r[1] < y_dim < r[3] and not (x_hi < r[0] or x_lo > r[2])
+            ]
+            if not overlapping:
+                continue
+            y_safe_b = min(r[1] for r in overlapping) - MIN_GAP
+            y_safe_t = max(r[3] for r in overlapping) + MIN_GAP
+            off_b = min(y1, y2) - y_safe_b
+            off_t = y_safe_t - max(y1, y2)
+            opts = []
+            if off_b > 0:
+                opts.append(("bottom", off_b))
+            if off_t > 0:
+                opts.append(("top", off_t))
+            if not opts:
+                opts = [("bottom", abs(min(y1, y2) - y_safe_b))]
+            best_side, best_off = min(opts, key=lambda o: o[1])
+            ent.side = best_side
+            ent.offset = best_off
+
+
 def convert_plotly_figure_to_scene(fig, name="SHEET") -> Scene:
     scene = Scene(name=name)
 
@@ -1664,6 +1751,8 @@ def convert_plotly_figure_to_scene(fig, name="SHEET") -> Scene:
 
     if is_rear_panel_sheet:
         _strip_edge_machining_for_rear_panel(scene)
+
+    _push_dimensions_outside_closed_surfaces(scene)
 
     return scene
 
