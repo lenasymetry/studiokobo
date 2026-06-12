@@ -763,12 +763,16 @@ def add_pro_dimension(fig, x0, y0, x1, y1, text_val, offset_dist, axis='x', colo
             _annotation_tracker.add(annotation_key)
 
         side = "left" if offset_dist < 0 else "right"
+        # Pour que le rendu DXF place la ligne de cote exactement à x_dim (comme Plotly),
+        # on stocke p1/p2 avec x = x_dim - offset_dist, de sorte que :
+        # DXF : min(p1.x, p2.x) - offset = (x_dim - offset_dist) - abs(offset_dist) = x_dim
+        dxf_ref_x = x_dim - offset_dist
         _push_dxf_dimension(
             fig,
             {
                 "axis": "y",
-                "p1": (float(x0), float(y0)),
-                "p2": (float(x1), float(y1)),
+                "p1": (float(dxf_ref_x), float(y0)),
+                "p2": (float(dxf_ref_x), float(y1)),
                 "offset": float(abs(offset_dist)),
                 "side": side,
                 "text": str(text_val),
@@ -4876,4 +4880,3 @@ def draw_machining_view_pro_final(panel_name, L, W, T, unit_str, project_info,
         showlegend=False
     )
     return fig
-
