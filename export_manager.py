@@ -803,7 +803,7 @@ def _build_door_face_holes(door_width, hinge_y_positions, hinge_side):
     return holes
 
 
-def _redistribute_hinge_y_positions_with_edge_offset(hinge_y_positions, door_height, edge, extra_offset_mm=80.0):
+def _redistribute_hinge_y_positions_with_edge_offset(hinge_y_positions, door_height, edge, extra_offset_mm=70.0):
     """Apply extra edge offset to one extreme hinge and redistribute evenly.
 
     edge='min': offset from lower edge (y=0) is increased by extra_offset_mm.
@@ -1044,8 +1044,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             h_side = H_raw
             L_trav = L_raw - 2 * t_lr
             W_mont = W_raw
-            W_back = L_raw - 2.0
-            H_back = H_raw - 2.0
+            # Fond en applique: panneau arrière à dimensions extérieures du caisson.
+            W_back = L_raw
+            H_back = H_raw
             
             ys_vis, ys_dowel = calculate_hole_positions(W_raw)
             holes_mg, holes_md = [], []
@@ -1533,18 +1534,18 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
 
                     if dp.get('door_model') == 'floor_length':
                         # Double + cache-pieds: two distinct mirrored variants.
-                        # Required rule: new offset = existing offset + 80 mm on one edge,
+                        # Required rule: new offset = existing offset + 70 mm on one edge,
                         # then redistribute all hinge center positions uniformly.
                         c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
 
                         title_left = f"PORTE DROITE (C{cab_idx})"
-                        y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=80.0)
+                        y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=70.0)
                         holes_p_left = _build_door_face_holes(dW_half, y_h_left, hinge_side='left')
                         plans.append((title_left, dW_half, dH, dp['door_thickness'], c_p, holes_p_left, [], [], None))
                         plan_quantities[title_left] = 1
 
                         title_right = f"PORTE GAUCHE (C{cab_idx})"
-                        y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
+                        y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=70.0)
                         # Keep cups on the same panel side as the left variant; only Y distribution is mirrored.
                         holes_p_right = _build_door_face_holes(dW_half, y_h_right, hinge_side='left')
                         plans.append((title_right, dW_half, dH, dp['door_thickness'], c_p, holes_p_right, [], [], None))
@@ -1854,8 +1855,9 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
         h_side = H_raw
         L_trav = L_raw - 2 * t_lr
         W_mont = W_raw
-        W_back = L_raw - 2.0
-        H_back = H_raw - 2.0
+        # Fond en applique: panneau arrière à dimensions extérieures du caisson.
+        W_back = L_raw
+        H_back = H_raw
         
         ys_vis, ys_dowel = calculate_hole_positions(W_raw)
         holes_mg, holes_md = [], []
@@ -2296,7 +2298,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                     c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
 
                     title_left = f"PORTE DROITE (C{cab_idx})"
-                    y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=80.0)
+                    y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=70.0)
                     holes_left = _build_door_face_holes(dW, y_h_left, hinge_side='left')
                     fig_left = draw_machining_view_pro_final(
                         title_left, dW, dH, dp.get('door_thickness', 19.0),
@@ -2305,7 +2307,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                     all_figures.append((title_left, fig_left))
 
                     title_right = f"PORTE GAUCHE (C{cab_idx})"
-                    y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
+                    y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=70.0)
                     # Keep cups on the same panel side as the left variant; only Y distribution is mirrored.
                     holes_right = _build_door_face_holes(dW, y_h_right, hinge_side='left')
                     fig_right = draw_machining_view_pro_final(
