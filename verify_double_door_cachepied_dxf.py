@@ -104,10 +104,10 @@ def check_double_cachepied_variants():
     xs_right = _hinge_centers_x(doc, plan_index=6, plan_width=dW)
 
     # Base default positions for dH=808 are [100, 404, 708]
-    # Left variant (edge min offset +80): [180, 444, 708]
-    # Right variant (edge max offset +80): [100, 364, 628]
-    assert ys_left == [580.0, 844.0, 1108.0], f"Unexpected left variant hinge Y centers: {ys_left}"
-    assert ys_right == [500.0, 764.0, 1028.0], f"Unexpected right variant hinge Y centers: {ys_right}"
+    # Left variant (edge min offset +70): [170, 439, 708]
+    # Right variant (edge max offset +70): [100, 369, 638]
+    assert ys_left == [570.0, 839.0, 1108.0], f"Unexpected left variant hinge Y centers: {ys_left}"
+    assert ys_right == [500.0, 769.0, 1038.0], f"Unexpected right variant hinge Y centers: {ys_right}"
     assert xs_left == [23.5], f"Unexpected left variant hinge X centers: {xs_left}"
     assert xs_right == [23.5], f"Unexpected right variant hinge X centers: {xs_right}"
 
