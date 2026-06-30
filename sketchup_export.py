@@ -336,8 +336,8 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
         if base_el.get("has_back_panel", True):
             add_panel(cab_node,
                       f"Fond – {cab_label}",
-                      ox + tl, oy + W - tb, oz + tt,
-                      L - 2*tl, tb, H - 2*tt)
+                          ox, oy + W, oz,
+                      L, tb, H)
 
         # ── Séparateurs verticaux (montants secondaires) ────────────────
         for j, div in enumerate(cabinet.get("vertical_dividers", [])):
@@ -346,7 +346,7 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
             add_panel(cab_node,
                       f"Séparateur {j+1} – {cab_label}",
                       ox + div_x - div_th / 2, oy, oz + tt,
-                      div_th, W - tb, H - 2*tt)
+                      div_th, W, H - 2*tt)
 
         # ── Étagères verticales ─────────────────────────────────────────
         for j, vs in enumerate(cabinet.get("vertical_shelves", [])):
@@ -379,10 +379,10 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
         if dp.get("has_door", False):
             gap      = float(dp.get("door_gap",       2.0))
             door_th  = float(dp.get("door_thickness", 19.0))
-            # Porte cache-pieds: descend de 80 mm sous le meuble.
+            # Porte cache-pieds: descend de 70 mm sous le meuble.
             if dp.get("door_model") == "floor_length":
-                d_H = H + 80.0 - gap
-                d_z = oz - 80.0
+                    d_H = H + 70.0 - gap
+                    d_z = oz - 70.0
             else:
                 d_H = H - 2 * gap
                 d_z = oz + gap
