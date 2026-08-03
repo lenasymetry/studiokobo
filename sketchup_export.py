@@ -308,6 +308,24 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
         cab_node_id = f"node_caisson_{_safe_xml_id(cab_label)}_{i+1}"
         cab_node = _add_group_node(meuble_node, cab_node_id, f"Caisson {cab_label}")
 
+        web_geometry = cabinet.get("web_render_geometry")
+        if isinstance(web_geometry, dict) and web_geometry.get("boxes"):
+            for j, box in enumerate(web_geometry.get("boxes", []), start=1):
+                color_group = str(box.get("color_group", "body"))
+                mat = "mat_body" if color_group == "body" else "mat_drawer"
+                add_panel(
+                    cab_node,
+                    f"Import Web {j} – {cab_label}",
+                    ox + float(box.get("x_mm", 0.0)),
+                    oy + float(box.get("y_mm", 0.0)),
+                    oz + float(box.get("z_mm", 0.0)),
+                    float(box.get("w_mm", 0.0)),
+                    float(box.get("d_mm", 0.0)),
+                    float(box.get("h_mm", 0.0)),
+                    mat=mat,
+                )
+            continue
+
         # ── Structure principale ────────────────────────────────────────
         if base_el.get("has_bottom_traverse", True):
             add_panel(cab_node,
@@ -336,8 +354,8 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
         if base_el.get("has_back_panel", True):
             add_panel(cab_node,
                       f"Fond – {cab_label}",
-                          ox, oy + W, oz,
-                      L, tb, H)
+                      ox + tl, oy + W - tb, oz + tt,
+                      L - 2*tl, tb, H - 2*tt)
 
         # ── Séparateurs verticaux (montants secondaires) ────────────────
         for j, div in enumerate(cabinet.get("vertical_dividers", [])):
@@ -346,7 +364,7 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
             add_panel(cab_node,
                       f"Séparateur {j+1} – {cab_label}",
                       ox + div_x - div_th / 2, oy, oz + tt,
-                      div_th, W, H - 2*tt)
+                      div_th, W - tb, H - 2*tt)
 
         # ── Étagères verticales ─────────────────────────────────────────
         for j, vs in enumerate(cabinet.get("vertical_shelves", [])):
@@ -374,15 +392,92 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
                       sh_x, oy, sh_z,
                       sh_w, max(0.0, sh_depth), sh_th)
 
-        # ── Porte(s) ────────────────────────────────────────────────────
-        dp = cabinet.get("door_props", {})
-        if dp.get("has_door", False):
+        # ── Porte(s) importee(s) explicites ─────────────────────────────
+        imported_doors = cabinet.get("imported_doors", []) or []
+        dp = None
+        if imported_doors:
+            is_ajar = str(door_mode).lower() == "ajar"
+            ajar_angle = abs(float(door_angle_deg)) if is_ajar else 0.0
+            for door_idx, imp_door in enumerate(imported_doors, start=1):
+                gap = float(imp_door.get("door_gap", 2.0))
+                door_th = float(imp_door.get("door_thickness", 19.0))
+                d_y = oy - door_th
+                d_z = oz + float(imp_door.get("door_bottom_offset", 0.0))
+                d_H = float(imp_door.get("door_face_H_raw", 0.0))
+                x_left = ox + float(imp_door.get("x_left_mm", 0.0))
+                x_right = ox + float(imp_door.get("x_right_mm", 0.0))
+                d_w = max(0.0, x_right - x_left)
+                if d_H <= 0.0 or d_w <= 0.0:
+                    continue
+
+                is_double_leaf = bool(imp_door.get("is_double_leaf", False))
+                if is_double_leaf:
+                    half = d_w / 2.0
+                    leaf_w = max(0.0, half - gap)
+                    if leaf_w <= 0.0:
+                        continue
+                    add_panel(
+                        cab_node,
+                        f"Porte Import G {door_idx} – {cab_label}",
+                        x_left + gap,
+                        d_y,
+                        d_z,
+                        leaf_w,
+                        door_th,
+                        d_H,
+                        mat="mat_door",
+                        rotation_deg=-ajar_angle,
+                        rotation_pivot_xy=(x_left + gap, d_y),
+                    )
+                    add_panel(
+                        cab_node,
+                        f"Porte Import D {door_idx} – {cab_label}",
+                        x_left + half,
+                        d_y,
+                        d_z,
+                        leaf_w,
+                        door_th,
+                        d_H,
+                        mat="mat_door",
+                        rotation_deg=ajar_angle,
+                        rotation_pivot_xy=(x_right - gap, d_y),
+                    )
+                    continue
+
+                opening = str(imp_door.get("door_opening", "right")).lower()
+                if opening == "left":
+                    rot = -ajar_angle
+                    pivot_x = x_left + gap
+                else:
+                    rot = ajar_angle
+                    pivot_x = x_right - gap
+
+                add_panel(
+                    cab_node,
+                    f"Porte Import {door_idx} – {cab_label}",
+                    x_left + gap,
+                    d_y,
+                    d_z,
+                    max(0.0, d_w - 2.0 * gap),
+                    door_th,
+                    d_H,
+                    mat="mat_door",
+                    rotation_deg=rot,
+                    rotation_pivot_xy=(pivot_x, d_y),
+                )
+
+        # ── Porte(s) natives ────────────────────────────────────────────
+        else:
+            dp = cabinet.get("door_props", {})
+            if not dp.get("has_door", False):
+                dp = None
+        if dp is not None:
             gap      = float(dp.get("door_gap",       2.0))
             door_th  = float(dp.get("door_thickness", 19.0))
-            # Porte cache-pieds: descend de 70 mm sous le meuble.
+            # Porte cache-pieds: descend de 80 mm sous le meuble.
             if dp.get("door_model") == "floor_length":
-                    d_H = H + 70.0 - gap
-                    d_z = oz - 70.0
+                d_H = H + 80.0 - gap
+                d_z = oz - 80.0
             else:
                 d_H = H - 2 * gap
                 d_z = oz + gap
@@ -429,9 +524,13 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
             bot_z    = oz + float(drp.get("drawer_bottom_offset", 0.0))
             d_y      = oy - face_th   # en façade, avant le caisson
 
-            # Largeur : utiliser la largeur intérieure par défaut
-            d_w = L - 2 * tl - 2 * gap
-            d_x = ox + tl + gap
+            if bool(drp.get("_use_explicit_x_bounds")) and drp.get("x_left_mm") is not None and drp.get("x_right_mm") is not None:
+                d_x = ox + float(drp.get("x_left_mm", 0.0))
+                d_w = max(0.0, float(drp.get("x_right_mm", 0.0)) - float(drp.get("x_left_mm", 0.0)))
+            else:
+                # Largeur : utiliser la largeur intérieure par défaut
+                d_w = L - 2 * tl - 2 * gap
+                d_x = ox + tl + gap
 
             add_panel(cab_node,
                       f"Façade Tiroir {j+1} – {cab_label}",
