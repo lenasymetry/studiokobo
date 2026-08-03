@@ -25,223 +25,35 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
-
-def resolve_logo_path(filename: str = "logo.png") -> str:
-    candidates = [
-        os.path.join(APP_DIR, filename),
-        os.path.join(os.path.dirname(APP_DIR), filename),
-        filename,
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return os.path.join(APP_DIR, filename)
-
-
+from state_manager import *
+from project_definitions import *
+from geometry_helpers import cuboid_mesh_for, add_zone_outlines_3d
+from machining_logic import calculate_all_zones_2d, calculate_origins_recursively
 from utils import calculate_available_space_between_horizontal_shelves
-from geometry_helpers import cuboid_mesh_for, cylinder_mesh_for, add_zone_annotations_to_figure, add_hatched_zones_3d, add_zone_outlines_3d, add_zone_debug_boxes_3d, check_element_placement_validity
-from excel_export import create_styled_excel
-from project_definitions import get_default_dims_19, get_default_door_props_19, get_default_drawer_props_19, get_legrabox_specs, get_default_joue_props
-from machining_logic import (
-    calculate_origins_recursively, get_hinge_y_positions, get_mobile_shelf_holes, 
-    calculate_back_panel_holes, detect_collisions, calculate_zones_from_dividers, 
-    get_vertical_divider_tranche_holes, get_traverse_holes_for_divider, get_traverse_face_holes_for_divider, get_mounting_holes_for_zone_element,
-    get_vertical_shelf_tranche_holes, calculate_vertical_zones_in_x_zone, calculate_all_zones_2d,
-    calculate_hole_positions
-)
-from drawing_interface import draw_machining_view_pro_final
-from state_manager import (
-    initialize_session_state, get_selected_cabinet, load_save_state, add_cabinet, clear_scene, delete_selected_cabinet,
-    update_selected_cabinet_dim, update_selected_cabinet_door, update_selected_cabinet_drawer,
-    add_shelf_callback, update_shelf_prop, delete_shelf_callback,
-    add_fixed_shelves_stack_callback,
-    update_selected_cabinet_material, update_selected_cabinet_door_material, 
-    update_selected_cabinet_drawer_material, update_shelf_material, update_hinge_count, update_hinge_position,
-    add_vertical_divider_callback, add_vertical_divider_double_callback,
-    update_vertical_divider_prop, delete_vertical_divider_callback, update_vertical_divider_material,
-    add_vertical_shelf_callback, update_vertical_shelf_prop, delete_vertical_shelf_callback, update_vertical_shelf_material,
-    add_drawer_callback, add_drawers_stack_callback, update_drawer_prop, delete_drawer_callback, update_drawer_material,
-    get_default_debit_data, update_selected_cabinet_base_element, update_hinge_count, update_hinge_position
-)
-from export_manager import generate_stacked_html_plans  # import for machining plans export
 
-st.set_page_config(page_title="KoboMeuble", layout="wide")
 initialize_session_state()
 
-# ---------------------------------------------------------------------------
-# Sérialisation JSON stable (clé de détection de changement de scène)
-# ---------------------------------------------------------------------------
-class _DateEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, datetime.date):
-            return obj.isoformat()
-        return super().default(obj)
 
 def _scene_to_json(scene):
-    """Retourne une chaîne JSON stable pour scene_cabinets – sert de clé de comparaison."""
-    return json.dumps(scene, cls=_DateEncoder, sort_keys=True)
+    return json.dumps(scene, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _normalize_materials_list(materials):
-    """Normalise une liste de matières (trim, unicité, ordre stable)."""
     if not materials:
         return []
-    out = []
-    seen = set()
-    for mat in materials:
-        mat_txt = str(mat).strip()
-        if not mat_txt or mat_txt in seen:
-            continue
-        out.append(mat_txt)
-        seen.add(mat_txt)
-    return out
+    if isinstance(materials, str):
+        materials = [materials]
+    normalized = []
+    for material in materials:
+        text = str(material).strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
 
 
-def _build_material_filter_key(selected_materials):
-    mats = _normalize_materials_list(selected_materials)
-    if not mats:
-        return "__ALL__"
-    return "||".join(mats)
-
-
-def _sanitize_export_name(value):
-    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value or ""))
-    safe = "_".join(part for part in safe.split("_") if part)
-    return safe or "Projet"
-
-
-def _build_deliverables_archive(project_name, xls_data, dxf_data, dxf_filename=None, selected_materials=None):
-    folder_name = f"Livrables_{_sanitize_export_name(project_name)}"
-    if selected_materials:
-        folder_name += "_matieres_selectionnees"
-
-    xlsx_name = f"Projet_{_sanitize_export_name(project_name)}.xlsx"
-    dxf_name = dxf_filename or f"Plans_{_sanitize_export_name(project_name)}.dxf"
-
-    archive_buffer = BytesIO()
-    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        if xls_data:
-            zip_file.writestr(f"{folder_name}/{xlsx_name}", xls_data)
-        if dxf_data:
-            zip_file.writestr(f"{folder_name}/{dxf_name}", dxf_data)
-    archive_buffer.seek(0)
-    archive_name = f"{folder_name}.zip"
-    return archive_buffer.getvalue(), archive_name
-
-
-def _generate_and_store_exports(all_parts, selected_materials=None):
-    """Génère les exports HTML, DXF, XLS et les stocke dans session_state."""
-    scene = st.session_state['scene_cabinets']
-    selected_materials = _normalize_materials_list(selected_materials)
-    selected_materials_set = set(selected_materials)
-    parts_for_filtered_exports = all_parts
-    if selected_materials_set:
-        parts_for_filtered_exports = [
-            part for part in all_parts
-            if str(part.get("Matière", "")).strip() in selected_materials_set
-        ]
-
-    # Export HTML
-    from export_manager import generate_stacked_html_plans
-    html_data, html_ok = generate_stacked_html_plans(scene, list(range(len(scene))))
-    st.session_state['exports_html_data'] = html_data
-    st.session_state['exports_html_ok'] = html_ok
-
-    # Export DXF
-    try:
-        from dxf_export import export_project_to_dxf
-        logo_path = resolve_logo_path("logo.png")
-        dxf_result = export_project_to_dxf(
-            {
-                "cabinets_data": scene,
-                "indices": list(range(len(scene))),
-                "project_name": st.session_state.project_name,
-                "client": st.session_state.client,
-                "comments": st.session_state.ref_chantier,
-                "version": "V1",
-                "paper_width_mm": 420.0,
-                "paper_height_mm": 297.0,
-                "page_margin_mm": 10.0,
-                "bbox_margin_factor": 1.05,
-                "text_height": 2.5,
-                "dimensions_text_height": 10.0,
-                "triangle_size": 8.0,
-                "logo_path": logo_path,
-                "presentation_cover_enabled": True,
-                "presentation_cover_title": st.session_state.get("presentation_cover_title", st.session_state.project_name),
-                "selected_materials": selected_materials,
-            },
-            mode="editable",
-            force_primitives_dims=False,
-            debug=False,
-            debug_stage="all",
-        )
-        st.session_state['exports_dwg_data'] = dxf_result.dxf_bytes
-        st.session_state['exports_dwg_ok'] = dxf_result.ok
-        st.session_state['exports_dwg_filename'] = f"usinage_{st.session_state.project_name.replace(' ', '_')}.dxf"
-    except Exception as e:
-        st.session_state['exports_dwg_data'] = f"Erreur export DXF: {str(e)}".encode('utf-8')
-        st.session_state['exports_dwg_ok'] = False
-        st.session_state['exports_dwg_filename'] = None
-
-    # Export XLS
-    project_info_export = {
-        "project_name": st.session_state.project_name,
-        "client": st.session_state.client,
-        "adresse_chantier": st.session_state.adresse_chantier,
-        "ref_chantier": st.session_state.ref_chantier,
-        "telephone": st.session_state.telephone,
-        "date_souhaitee": st.session_state.date_souhaitee,
-        "panneau_decor": st.session_state.panneau_decor,
-        "chant_mm": st.session_state.chant_mm,
-        "decor_chant": st.session_state.decor_chant,
-        "corps_meuble": "Ensemble",
-        "quantity": 1,
-        "date": datetime.date.today().strftime("%Y-%m-%d"),
-    }
-    save_data_export = {
-        'project_name': st.session_state.project_name,
-        'scene_cabinets': scene,
-    }
-    st.session_state['exports_xls_data'] = create_styled_excel(
-        project_info_export,
-        pd.DataFrame(parts_for_filtered_exports) if parts_for_filtered_exports else pd.DataFrame(),
-        save_data_export,
-    )
-
-    # Export SketchUp (Collada .dae)
-    try:
-        from sketchup_export import generate_sketchup_collada
-        has_doors = any(bool(cab.get('door_props', {}).get('has_door', False)) for cab in scene)
-
-        skp_closed_bytes = generate_sketchup_collada(scene, door_mode="closed")
-        st.session_state['exports_skp_closed_data'] = skp_closed_bytes
-        st.session_state['exports_skp_closed_ok'] = bool(skp_closed_bytes)
-
-        if has_doors:
-            skp_open_bytes = generate_sketchup_collada(scene, door_mode="ajar", door_angle_deg=50.0)
-            st.session_state['exports_skp_open_data'] = skp_open_bytes
-            st.session_state['exports_skp_open_ok'] = bool(skp_open_bytes)
-        else:
-            st.session_state['exports_skp_open_data'] = None
-            st.session_state['exports_skp_open_ok'] = False
-
-        st.session_state['exports_skp_has_doors'] = has_doors
-        # Compatibilité avec l'ancien état (utilisé ailleurs)
-        st.session_state['exports_skp_data'] = skp_closed_bytes
-        st.session_state['exports_skp_ok'] = bool(skp_closed_bytes)
-    except Exception:
-        st.session_state['exports_skp_data'] = None
-        st.session_state['exports_skp_ok'] = False
-        st.session_state['exports_skp_has_doors'] = False
-        st.session_state['exports_skp_closed_data'] = None
-        st.session_state['exports_skp_closed_ok'] = False
-        st.session_state['exports_skp_open_data'] = None
-        st.session_state['exports_skp_open_ok'] = False
-
-    # Marquer la scène comme générée
-    st.session_state['exports_scene_json'] = _scene_to_json(scene)
-    st.session_state['exports_material_filter_key'] = _build_material_filter_key(selected_materials)
+def _build_material_filter_key(materials):
+    normalized = _normalize_materials_list(materials)
+    return "|".join(sorted(normalized)) if normalized else None
 
 
 def _generate_and_store_hole_counts():
@@ -689,6 +501,10 @@ def _render_exports(all_parts):
     skp_closed_ok = st.session_state.get('exports_skp_closed_ok', False)
     skp_open_data = st.session_state.get('exports_skp_open_data')
     skp_open_ok = st.session_state.get('exports_skp_open_ok', False)
+    views3d_pdf_data = st.session_state.get('exports_3d_pdf_data')
+    views3d_pdf_ok   = st.session_state.get('exports_3d_pdf_ok', False)
+    rb_data = st.session_state.get('exports_rb_data')
+    rb_ok   = st.session_state.get('exports_rb_ok', False)
     deliverables_zip_data = None
     deliverables_zip_name = None
     if xls_data and dwg_ok and dwg_data:
@@ -788,6 +604,48 @@ def _render_exports(all_parts):
                 else:
                     st.warning("⚠️ Export SketchUp portes entre-ouvertes indisponible.")
 
+        # ── Vues 3D cotées ─────────────────────────────────────────────
+        st.divider()
+        st.markdown("#### 📐 Vues 3D cotées (pour menuisiers)")
+        st.caption(
+            "Vues de face, côté, dessus et perspective avec toutes les cotations nécessaires à la fabrication."
+        )
+        vues_col1, vues_col2 = st.columns(2)
+
+        with vues_col1:
+            if views3d_pdf_ok and views3d_pdf_data:
+                st.download_button(
+                    "🖼️ Vues 3D cotées (.pdf)",
+                    views3d_pdf_data,
+                    f"Vues3D_{st.session_state.project_name.replace(' ', '_')}.pdf",
+                    "application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                )
+            else:
+                st.warning("⚠️ PDF vues 3D indisponible.")
+                err_3d = st.session_state.get('exports_3d_error')
+                if err_3d:
+                    with st.expander("Détails de l'erreur"):
+                        st.code(err_3d)
+
+        with vues_col2:
+            if rb_ok and rb_data:
+                st.download_button(
+                    "📐 Script cotations SketchUp (.rb)",
+                    rb_data,
+                    f"Cotations_{st.session_state.project_name.replace(' ', '_')}.rb",
+                    "text/plain",
+                    use_container_width=True,
+                )
+                st.caption(
+                    "Importe le .dae dans SketchUp, puis : "
+                    "Window → Ruby Console → coller le script → Entrée. "
+                    "Les cotations natives apparaissent automatiquement."
+                )
+            else:
+                st.warning("⚠️ Script Ruby indisponible.")
+
 
 def get_automatic_edge_banding(part_name):
     name = part_name.lower()
@@ -870,9 +728,8 @@ def calculate_all_project_parts():
         t_lr, t_tb, t_fb = dims['t_lr_raw'], dims['t_tb_raw'], dims['t_fb_raw']
         h_side = dims['H_raw'] 
         L_traverse = max(0.0, L_eff - 2 * t_lr)
-        # Fond en applique: dimensions extérieures du caisson.
-        dim_fond_vertical = dims['H_raw']
-        dim_fond_horizontal = max(0.0, L_eff)
+        dim_fond_vertical = dims['H_raw'] - 2.0
+        dim_fond_horizontal = max(0.0, L_eff - 2.0)
         
         panel_dims = {
             "Traverse Bas": (L_traverse, dims['W_raw'], t_tb),
@@ -1032,12 +889,41 @@ def calculate_all_project_parts():
                 "Usinage": "",
             })
         
-        # 2. Porte
-        if cabinet['door_props']['has_door']:
+        # 2. Porte(s) importee(s) explicites (JSON web)
+        imported_doors = cabinet.get('imported_doors', []) or []
+        if imported_doors:
+            cav, car, cg, cd = get_automatic_edge_banding("Porte")
+            usinage_porte = "CF plan" if has_holes_for_piece("Porte", cabinet) else ""
+            for door_idx, imp_door in enumerate(imported_doors, start=1):
+                dH = float(imp_door.get('door_face_H_raw', 0.0))
+                dW_total = max(0.0, float(imp_door.get('x_right_mm', 0.0)) - float(imp_door.get('x_left_mm', 0.0)))
+                is_double_leaf = bool(imp_door.get('is_double_leaf', False))
+                qty = 2 if is_double_leaf else 1
+                dW = (dW_total / 2.0) if is_double_leaf else dW_total
+                if dH <= 0.0 or dW <= 0.0:
+                    continue
+                all_parts.append({
+                    "Lettre": f"C{i}-P{door_idx}",
+                    "Référence Pièce": f"Porte Import {door_idx} (C{i})",
+                    "Matière": imp_door.get('material', 'Matière Porte'),
+                    "Caisson": f"C{i}",
+                    "Qté": qty,
+                    "Longueur (mm)": dH,
+                    "Largeur (mm)": dW,
+                    "Epaisseur": float(imp_door.get('door_thickness', 19.0)),
+                    "Chant Avant": cav,
+                    "Chant Arrière": car,
+                    "Chant Gauche": cg,
+                    "Chant Droit": cd,
+                    "Usinage": usinage_porte,
+                })
+
+        # 2b. Porte native unique/double sur tout le caisson
+        elif cabinet['door_props']['has_door']:
             dp = cabinet['door_props']
             dH = dims['H_raw'] - (2 * dp['door_gap']) 
             if dp.get('door_model') == 'floor_length':
-                dH += 70.0
+                dH += 80.0
             
             # Vérifier si une zone est assignée
             zone_id = dp.get('zone_id', None)
@@ -1594,6 +1480,8 @@ with col1:
         st.markdown('<p class="kb-note">Si vous avez déjà un projet, chargez votre fichier XLS pour reprendre le travail.</p>', unsafe_allow_html=True)
         st.info("La sauvegarde du projet reste incluse dans le téléchargement XLS.")
         st.file_uploader("Charger un Projet (.xlsx)", type=["xlsx"], key="file_loader", on_change=load_save_state)
+        st.caption("Import configurateur web: chargez le JSON client pour reconstruire un meuble représentatif.")
+        st.file_uploader("Charger un Projet Configurateur (.json)", type=["json"], key="web_json_loader", on_change=load_web_config_json_state)
         st.markdown("---")
         st.markdown('<div class="kb-step">Etape 1C - Assemblage de la scène</div>', unsafe_allow_html=True)
         st.markdown('<p class="kb-note">Commencez par le caisson principal puis ajoutez les caissons secondaires avec le panneau interactif.</p>', unsafe_allow_html=True)
@@ -2966,9 +2854,8 @@ with col1:
                     t_lr, t_tb, t_fb = dims['t_lr_raw'], dims['t_tb_raw'], dims['t_fb_raw']
                     h_side = dims['H_raw']
                     L_traverse = max(0.0, L_eff - 2 * t_lr)
-                    # Fond en applique: dimensions extérieures du caisson.
-                    dim_fond_vertical = dims['H_raw']
-                    dim_fond_horizontal = max(0.0, L_eff)
+                    dim_fond_vertical = dims['H_raw'] - 2.0
+                    dim_fond_horizontal = max(0.0, L_eff - 2.0)
                     panel_dims = {
                         "Traverse Bas": (L_traverse, dims['W_raw'], t_tb),
                         "Traverse Haut": (L_traverse, dims['W_raw'], t_tb),
@@ -3221,6 +3108,26 @@ with col2:
             o = abs_origins[i]; d = cab['dims']; L, W, H = d['L_raw']*unit_factor, d['W_raw']*unit_factor, d['H_raw']*unit_factor
             tl, tb, tt = d['t_lr_raw']*unit_factor, d['t_fb_raw']*unit_factor, d['t_tb_raw']*unit_factor
 
+            web_geometry = cab_render.get('web_render_geometry')
+            if isinstance(web_geometry, dict) and web_geometry.get('boxes'):
+                for box in web_geometry.get('boxes', []):
+                    color_group = str(box.get('color_group', 'body'))
+                    box_color = BODY_COLOR if color_group == 'body' else ACCESSORY_COLOR
+                    fig3d.add_trace(cuboid_mesh_for(
+                        float(box.get('w_mm', 0.0)) * unit_factor,
+                        float(box.get('d_mm', 0.0)) * unit_factor,
+                        float(box.get('h_mm', 0.0)) * unit_factor,
+                        (
+                            o[0] + float(box.get('x_mm', 0.0)) * unit_factor,
+                            o[1] + float(box.get('y_mm', 0.0)) * unit_factor,
+                            o[2] + float(box.get('z_mm', 0.0)) * unit_factor,
+                        ),
+                        color=box_color,
+                        opacity=BODY_OPACITY if color_group == 'body' else ACCESSORY_OPACITY,
+                        showlegend=False,
+                    ))
+                continue
+
             # Fileur : le caisson perd la largeur du fileur côté ouverture
             _dp_f = cab.get('door_props', {})
             _fileur_mm = float(_dp_f.get('fileur_width', 0)) * unit_factor
@@ -3252,12 +3159,16 @@ with col2:
                 fig3d.add_trace(cuboid_mesh_for(tl, W, H, (o[0]+L-tl, o[1], o[2]), color=BODY_COLOR, opacity=BODY_OPACITY, showlegend=False))
             # Panneau Arrière (Fond)
             if base_el.get('has_back_panel', True):
-                # Fond en applique: panneau complet posé à l'arrière du caisson.
-                fig3d.add_trace(cuboid_mesh_for(L, tb, H, (o[0], o[1]+W, o[2]), color=BODY_COLOR, opacity=BODY_OPACITY, showlegend=False))
+                fig3d.add_trace(cuboid_mesh_for(L-2*tl, tb, H-2*tt, (o[0]+tl, o[1]+W-tb, o[2]+tt), color=BODY_COLOR, opacity=BODY_OPACITY, showlegend=False))
             
             # Rendu des montants verticaux secondaires AVANT TOUS les autres éléments pour qu'ils soient visibles
             if 'vertical_dividers' in cab_render and cab_render['vertical_dividers']:
                 DIVIDER_COLOR = "#8B7355"
+                PARTIAL_DIVIDER_COLOR = "#A0826D"
+                interior_h_mm = max(
+                    0.0,
+                    float(cab_render['dims'].get('H_raw', 0.0)) - 2.0 * float(cab_render['dims'].get('t_tb_raw', 19.0)),
+                )
                 for div in cab_render['vertical_dividers']:
                     # position_x est en mm depuis le début du caisson (o[0])
                     div_x_mm = div['position_x']
@@ -3265,11 +3176,37 @@ with col2:
                     div_x = div_x_mm * unit_factor
                     div_th = div_th_mm * unit_factor
                     is_preview = bool(div.get('_preview'))
+                    force_full_height = bool(div.get('_force_full_height', False))
+                    div_bottom_y_mm = div.get('bottom_y', None)
+                    div_top_y_mm = div.get('top_y', None)
+                    if force_full_height:
+                        div_bottom_y_mm = 0.0
+                        div_top_y_mm = interior_h_mm
+                    if div_bottom_y_mm is None or div_top_y_mm is None:
+                        stored_zone_coords = div.get('stored_zone_coords', None)
+                        if stored_zone_coords:
+                            div_bottom_y_mm = stored_zone_coords.get('y_min')
+                            div_top_y_mm = stored_zone_coords.get('y_max')
+                    if div_bottom_y_mm is not None and div_top_y_mm is not None:
+                        div_bottom_y_mm = max(0.0, float(div_bottom_y_mm))
+                        div_top_y_mm = max(div_bottom_y_mm, float(div_top_y_mm))
+                        div_height_mm = div_top_y_mm - div_bottom_y_mm
+                        div_z = o[2] + tt + (div_bottom_y_mm * unit_factor)
+                        div_color = PARTIAL_DIVIDER_COLOR if div_height_mm < (interior_h_mm - 0.5) else DIVIDER_COLOR
+                        fig3d.add_trace(cuboid_mesh_for(
+                            div_th, W - tb, div_height_mm * unit_factor,
+                            (o[0] + div_x - div_th/2, o[1], div_z),
+                            color=("#666666" if is_preview else div_color),
+                            opacity=(0.35 if is_preview else BODY_OPACITY),
+                            showlegend=False
+                        ))
+                        continue
+
                     # Montant vertical : position X = o[0] + div_x_mm (en unités)
                     # Le montant va de (div_x_mm - div_th_mm/2) à (div_x_mm + div_th_mm/2) en mm
-                    # Fond en applique: les montants peuvent aller sur toute la profondeur W.
+                    # Profondeur : W - tb pour ne pas traverser le panneau arrière
                     fig3d.add_trace(cuboid_mesh_for(
-                        div_th, W, H-2*tt,
+                        div_th, W - tb, H-2*tt,
                         (o[0] + div_x - div_th/2, o[1], o[2] + tt),
                         color=("#666666" if is_preview else DIVIDER_COLOR),
                         opacity=(0.35 if is_preview else BODY_OPACITY),
@@ -3328,11 +3265,71 @@ with col2:
             zones_render_all = calculate_all_zones_2d(cab_render, include_all_elements=True)
             zones_render_without_elements = calculate_all_zones_2d(cab_render, include_all_elements=False)
             
-            if cab_render['door_props']['has_door']:
+            imported_doors = cab_render.get('imported_doors', []) or []
+            if imported_doors:
+                for door_idx, imp_door in enumerate(imported_doors):
+                    gap_mm = float(imp_door.get('door_gap', 2.0))
+                    gap = gap_mm * unit_factor
+                    thk = float(imp_door.get('door_thickness', 19.0)) * unit_factor
+                    dy = o[1] - thk
+                    dH = float(imp_door.get('door_face_H_raw', 0.0)) * unit_factor
+                    dz = o[2] + float(imp_door.get('door_bottom_offset', 0.0)) * unit_factor
+                    x_left_abs = o[0] + float(imp_door.get('x_left_mm', 0.0)) * unit_factor
+                    x_right_abs = o[0] + float(imp_door.get('x_right_mm', 0.0)) * unit_factor
+                    dW = max(0.0, x_right_abs - x_left_abs)
+                    if dW <= 0.0 or dH <= 0.0:
+                        continue
+
+                    opening = imp_door.get('door_opening', 'right')
+                    is_double_leaf = bool(imp_door.get('is_double_leaf', False))
+                    if is_double_leaf:
+                        half_w = dW / 2.0
+                        left_x = x_left_abs + gap
+                        right_x = x_left_abs + half_w
+                        door_w = max(0.0, half_w - gap)
+                        if door_w > 0.0:
+                            fig3d.add_trace(cuboid_mesh_for(
+                                door_w, thk, dH,
+                                (left_x, dy, dz),
+                                color=ACCESSORY_COLOR,
+                                opacity=ACCESSORY_OPACITY,
+                                name=f"Porte import G {i}-{door_idx}",
+                                rotation_angle=-45,
+                                rotation_axis='z',
+                                rotation_pivot=(x_left_abs + gap, dy, dz)
+                            ))
+                            fig3d.add_trace(cuboid_mesh_for(
+                                door_w, thk, dH,
+                                (right_x, dy, dz),
+                                color=ACCESSORY_COLOR,
+                                opacity=ACCESSORY_OPACITY,
+                                name=f"Porte import D {i}-{door_idx}",
+                                rotation_angle=45,
+                                rotation_axis='z',
+                                rotation_pivot=(x_right_abs - gap, dy, dz)
+                            ))
+                    else:
+                        rot_angle = 45 if opening == 'right' else -45
+                        pivot_x = x_right_abs - gap if opening == 'right' else x_left_abs + gap
+                        door_x_start = x_left_abs + gap
+                        door_w = max(0.0, dW - 2.0 * gap)
+                        if door_w > 0.0:
+                            fig3d.add_trace(cuboid_mesh_for(
+                                door_w, thk, dH,
+                                (door_x_start, dy, dz),
+                                color=ACCESSORY_COLOR,
+                                opacity=ACCESSORY_OPACITY,
+                                name=f"Porte import {i}-{door_idx}",
+                                rotation_angle=rot_angle,
+                                rotation_axis='z',
+                                rotation_pivot=(pivot_x, dy, dz)
+                            ))
+
+            elif cab_render['door_props']['has_door']:
                 dp = cab_render['door_props']; gap = dp['door_gap'] * unit_factor; thk = dp.get('door_thickness', 19.0) * unit_factor; dy = o[1] - thk
                 if dp.get('door_model') == 'floor_length':
-                    cache_pied_drop = 70.0 * unit_factor
-                    # La porte cache-pieds descend de 70 mm sous le meuble.
+                    cache_pied_drop = 80.0 * unit_factor
+                    # La porte cache-pieds descend de 80 mm sous le meuble.
                     dH = H + cache_pied_drop - gap
                     dz = o[2] - cache_pied_drop
                 else:
@@ -3399,27 +3396,80 @@ with col2:
                 # Les tiroirs ne créent pas de zones, ils sont placés dans des zones existantes
                 all_zones_2d_drawers = zones_render_without_elements
 
+                def _resolve_drawer_zone(drp):
+                    tol_mm = 2.0
+                    stored_zone_coords = drp.get('stored_zone_coords', None)
+                    if stored_zone_coords:
+                        for z in all_zones_2d_drawers:
+                            if (
+                                abs(float(z['x_min']) - float(stored_zone_coords.get('x_min', z['x_min']))) <= tol_mm
+                                and abs(float(z['x_max']) - float(stored_zone_coords.get('x_max', z['x_max']))) <= tol_mm
+                                and abs(float(z['y_min']) - float(stored_zone_coords.get('y_min', z['y_min']))) <= tol_mm
+                                and abs(float(z['y_max']) - float(stored_zone_coords.get('y_max', z['y_max']))) <= tol_mm
+                            ):
+                                return z
+
+                    zone_id = drp.get('zone_id', None)
+                    if zone_id is not None and 0 <= zone_id < len(all_zones_2d_drawers):
+                        return all_zones_2d_drawers[zone_id]
+                    return None
+
                 # Identifier les zone_ids occupées par des tiroirs à l'anglaise
                 # (pour rendre les tiroirs classiques de la même zone semi-transparents)
                 anglaise_zone_ids = set()
                 for _drp_check in cab_render['drawers']:
                     if _drp_check.get('drawer_system') == 'ANGLAISE':
-                        _zid = _drp_check.get('zone_id')
-                        if _zid is not None:
-                            anglaise_zone_ids.add(_zid)
+                        _z = _resolve_drawer_zone(_drp_check)
+                        if _z is not None:
+                            anglaise_zone_ids.add(_z.get('id'))
                 
                 for drawer_idx, drp in enumerate(cab_render['drawers']):
                     gap = drp.get('drawer_gap', 2.0) * unit_factor
                     thk = drp.get('drawer_face_thickness', 19.0) * unit_factor
                     is_preview = bool(drp.get('_preview'))
                     drawer_system = drp.get('drawer_system', 'TANDEMBOX')
+                    use_explicit_x_bounds = bool(drp.get('_use_explicit_x_bounds'))
+
+                    if use_explicit_x_bounds and drp.get('x_left_mm') is not None and drp.get('x_right_mm') is not None:
+                        x_left_mm = float(drp.get('x_left_mm', 0.0))
+                        x_right_mm = float(drp.get('x_right_mm', 0.0))
+                        explicit_width = max(0.0, x_right_mm - x_left_mm) * unit_factor
+                        explicit_x_start = o[0] + x_left_mm * unit_factor
+                        drawer_height = drp.get('drawer_face_H_raw', 150.0) * unit_factor
+                        drawer_z_pos = o[2] + (drp.get('drawer_bottom_offset', 0.0) * unit_factor)
+                        is_applique = bool(drp.get('_applique_mode', False))
+
+                        if drawer_system == 'ANGLAISE':
+                            drawer_depth = drp.get('drawer_face_thickness', 19.0) * unit_factor
+                            drawer_y_pos = o[1] + (30.0 * unit_factor)
+                        elif is_applique:
+                            drawer_depth = drp.get('drawer_face_thickness', 19.0) * unit_factor
+                            drawer_y_pos = o[1] - drawer_depth
+                        else:
+                            interior_depth = W - 2 * tb
+                            drawer_depth = interior_depth - (19.0 * unit_factor)
+                            drawer_y_pos = o[1] + tb
+
+                        drawer_color = "#666666" if is_preview else (
+                            "#8B4513" if drawer_system == 'ANGLAISE' else ACCESSORY_COLOR
+                        )
+                        drawer_opacity = 0.35 if is_preview else ACCESSORY_OPACITY
+                        if explicit_width > 0 and drawer_depth > 0:
+                            fig3d.add_trace(cuboid_mesh_for(
+                                explicit_width, drawer_depth, drawer_height,
+                                (explicit_x_start, drawer_y_pos, drawer_z_pos),
+                                color=drawer_color,
+                                opacity=drawer_opacity,
+                                name=f"Tiroir import {i}-{drawer_idx}"
+                            ))
+                        continue
                     
-                    # Vérifier si une zone est assignée
-                    zone_id = drp.get('zone_id', None)
-                    
-                    if zone_id is not None and zone_id < len(all_zones_2d_drawers):
+                    resolved_zone = _resolve_drawer_zone(drp)
+
+                    if resolved_zone is not None:
                         # Tiroir dans une zone spécifique
-                        zone = all_zones_2d_drawers[zone_id]
+                        zone = resolved_zone
+                        zone_id = zone.get('id', None)
                         zone_x_min_mm = zone['x_min']
                         zone_x_max_mm = zone['x_max']
                         
@@ -3544,6 +3594,8 @@ with col2:
                     # Ne JAMAIS recalculer la position à partir de la zone pour les éléments validés
                     # Les zones peuvent changer, mais les positions stockées restent fixes
                     zone_id = s.get('zone_id', None)
+                    stored_shelf_width_mm = s.get('stored_shelf_width_mm')
+                    stored_shelf_x_start_mm = s.get('stored_shelf_x_start_mm')
                     
                     # Rechercher la zone correspondante
                     zone = None
@@ -3571,126 +3623,72 @@ with col2:
                             if zone is None and zone_id < len(all_zones_2d):
                                 zone = all_zones_2d[zone_id]
                     
-                    if zone is not None:
-                        # IMPORTANT : Pour les étagères validées, utiliser la largeur et position stockées
-                        # pour éviter que leur largeur change quand de nouveaux éléments sont ajoutés
-                        if not is_preview and s.get('stored_shelf_width_mm') is not None and s.get('stored_shelf_x_start_mm') is not None:
-                            # Utiliser les valeurs stockées directement pour les éléments validés
-                            shelf_width = s['stored_shelf_width_mm'] * unit_factor
-                            shelf_x_start = o[0] + (s['stored_shelf_x_start_mm'] * unit_factor)
-                        else:
-                            # Pour les éléments en preview, recalculer à partir de la zone
-                            zone_x_min_mm = zone['x_min']  # En mm
-                            zone_x_max_mm = zone['x_max']  # En mm
-                            
-                            # Convertir en coordonnées absolues pour la 3D
-                            zone_x_min_abs = o[0] + (zone_x_min_mm * unit_factor)
-                            zone_x_max_abs = o[0] + (zone_x_max_mm * unit_factor)
-                            zone_width_abs = zone_x_max_abs - zone_x_min_abs
-                            
-                            # L'étagère doit être STRICTEMENT dans la zone, sans toucher les montants
-                            # Calculer les positions des montants verticaux (principaux et secondaires) pour vérification
-                            # IMPORTANT : Les étagères horizontales doivent toucher les montants principaux OU secondaires,
-                            # mais PAS les étagères verticales
-                            divider_bounds = []
-                            # Montant gauche (principal)
-                            divider_bounds.append((o[0], o[0] + tl))
-                            # Montant droit (principal)
-                            divider_bounds.append((o[0] + L - tl, o[0] + L))
-                            # Montants secondaires
-                            if 'vertical_dividers' in cab_render:
-                                for div in cab_render['vertical_dividers']:
-                                    div_x_mm = div['position_x']
-                                    div_th_mm = div.get('thickness', 19.0)
-                                    div_x_min_abs = o[0] + (div_x_mm - div_th_mm/2.0) * unit_factor
-                                    div_x_max_abs = o[0] + (div_x_mm + div_th_mm/2.0) * unit_factor
-                                    divider_bounds.append((div_x_min_abs, div_x_max_abs))
-                            # Les étagères verticales NE sont PAS ajoutées - elles ne sont pas des montants
-                            
-                            # PLUS DE JEU : l'étagère suit exactement la largeur de la zone en X
-                            if s_type == 'mobile':
-                                shelf_width = zone_width_abs
-                                shelf_x_start = zone_x_min_abs
-                            else:
-                                shelf_width = zone_width_abs
-                                shelf_x_start = zone_x_min_abs
-                        
-                        # Calculer les positions des montants verticaux pour vérification de collision
-                        divider_bounds = []
-                        # Montant gauche (principal)
-                        divider_bounds.append((o[0], o[0] + tl))
-                        # Montant droit (principal)
-                        divider_bounds.append((o[0] + L - tl, o[0] + L))
-                        # Montants secondaires
-                        if 'vertical_dividers' in cab_render:
-                            for div in cab_render['vertical_dividers']:
-                                div_x_mm = div['position_x']
-                                div_th_mm = div.get('thickness', 19.0)
-                                div_x_min_abs = o[0] + (div_x_mm - div_th_mm/2.0) * unit_factor
-                                div_x_max_abs = o[0] + (div_x_mm + div_th_mm/2.0) * unit_factor
-                                divider_bounds.append((div_x_min_abs, div_x_max_abs))
-                        # Les étagères verticales NE sont PAS ajoutées - elles ne sont pas des montants
-                            
-                            # Vérification de sécurité : s'assurer que l'étagère ne dépasse pas
-                            shelf_x_end = shelf_x_start + shelf_width
-                            
-                        # Pour les éléments validés avec valeurs stockées, on considère qu'ils sont toujours valides
-                        # Pour les éléments en preview, vérifier qu'ils sont dans la zone
-                        if not is_preview and s.get('stored_shelf_width_mm') is not None:
-                            in_zone = True  # Les éléments validés sont toujours considérés comme valides
-                            touches_divider = False  # Pas de vérification de collision pour les éléments validés
-                        else:
-                            # Pour les éléments en preview, vérifier qu'ils sont dans la zone
-                            zone_x_min_abs = o[0] + (zone['x_min'] * unit_factor)
-                            zone_x_max_abs = o[0] + (zone['x_max'] * unit_factor)
-                            in_zone = shelf_width > 0 and shelf_x_start >= zone_x_min_abs and shelf_x_end <= zone_x_max_abs
-                            touches_divider = False
-                            
-                            if in_zone and divider_bounds:
-                                for div_min, div_max in divider_bounds:
-                                    # Vérifier si l'étagère chevauche le montant (avec une petite tolérance)
-                                    if (shelf_x_start <= div_max + 0.001 and shelf_x_end >= div_min - 0.001):
-                                        touches_divider = True
-                                        break
-                            
-                        # Validation du placement : vérifier si l'élément est dans une zone valide
-                        is_valid_placement = True
-                        if is_preview:
-                            # Pour les éléments en preview, vérifier la validité du placement
-                            all_zones_2d_for_validation = zones_render_all
-                            is_valid_placement, validation_reason = check_element_placement_validity(s, all_zones_2d_for_validation, cab_render, element_type='shelf')
-                            
-                            # Choisir la couleur selon la validité du placement
-                            if in_zone and not touches_divider and not is_valid_placement:
-                                shelf_color = "rgba(255, 0, 0, 1.0)"  # Rouge vif pour placement invalide
-                                shelf_opacity = 0.8
-                            else:
-                                shelf_color = "#666666"
-                                shelf_opacity = 0.35
-                        else:
-                            shelf_color = BODY_COLOR
-                            shelf_opacity = BODY_OPACITY
+                    divider_bounds = []
+                    divider_bounds.append((o[0], o[0] + tl))
+                    divider_bounds.append((o[0] + L - tl, o[0] + L))
+                    if 'vertical_dividers' in cab_render:
+                        for div in cab_render['vertical_dividers']:
+                            div_x_mm = div['position_x']
+                            div_th_mm = div.get('thickness', 19.0)
+                            div_x_min_abs = o[0] + (div_x_mm - div_th_mm/2.0) * unit_factor
+                            div_x_max_abs = o[0] + (div_x_mm + div_th_mm/2.0) * unit_factor
+                            divider_bounds.append((div_x_min_abs, div_x_max_abs))
 
-                        # Règle demandée: étagère = traverse (même largeur X et même profondeur Y).
+                    if stored_shelf_width_mm is not None and stored_shelf_x_start_mm is not None:
+                        shelf_width = max(0.0, float(stored_shelf_width_mm) * unit_factor)
+                        shelf_x_start = o[0] + float(stored_shelf_x_start_mm) * unit_factor
+                        shelf_x_end = shelf_x_start + shelf_width
+                    elif zone is not None:
+                        zone_x_min_abs = o[0] + (zone['x_min'] * unit_factor)
+                        zone_x_max_abs = o[0] + (zone['x_max'] * unit_factor)
+                        shelf_width = max(0.0, zone_x_max_abs - zone_x_min_abs)
+                        shelf_x_start = zone_x_min_abs
+                        shelf_x_end = zone_x_max_abs
+                    else:
                         shelf_width = max(0.0, L - 2 * tl)
                         shelf_x_start = o[0] + tl
-                        shelf_depth = W
-                        
-                        fig3d.add_trace(cuboid_mesh_for(
-                            shelf_width, max(0.0, shelf_depth - 0.01), s['thickness']*unit_factor, (shelf_x_start, o[1], sh_z),
-                            color=shelf_color,
-                            opacity=shelf_opacity,
-                            showlegend=False
-                        ))
+                        shelf_x_end = shelf_x_start + shelf_width
+
+                    if zone is not None:
+                        zone_x_min_abs = o[0] + (zone['x_min'] * unit_factor)
+                        zone_x_max_abs = o[0] + (zone['x_max'] * unit_factor)
                     else:
-                        # Pas de zone ou zone_id invalide : étagère = traverse
-                        shelf_depth = W
-                        fig3d.add_trace(cuboid_mesh_for(
-                            L-2*tl, max(0.0, shelf_depth - 0.01), s['thickness']*unit_factor, (o[0]+tl, o[1], sh_z),
-                            color=("#666666" if is_preview else BODY_COLOR),
-                            opacity=(0.35 if is_preview else BODY_OPACITY),
-                            showlegend=False
-                        ))
+                        zone_x_min_abs = None
+                        zone_x_max_abs = None
+
+                    if not is_preview:
+                        in_zone = True
+                        touches_divider = False
+                    else:
+                        in_zone = (zone is not None and shelf_width > 0 and shelf_x_start >= zone_x_min_abs and shelf_x_end <= zone_x_max_abs)
+                        touches_divider = False
+                        if in_zone and divider_bounds:
+                            for div_min, div_max in divider_bounds:
+                                if (shelf_x_start <= div_max + 0.001 and shelf_x_end >= div_min - 0.001):
+                                    touches_divider = True
+                                    break
+
+                    is_valid_placement = True
+                    if is_preview:
+                        all_zones_2d_for_validation = zones_render_all
+                        is_valid_placement, validation_reason = check_element_placement_validity(s, all_zones_2d_for_validation, cab_render, element_type='shelf')
+                        if in_zone and not touches_divider and not is_valid_placement:
+                            shelf_color = "rgba(255, 0, 0, 1.0)"
+                            shelf_opacity = 0.8
+                        else:
+                            shelf_color = "#666666"
+                            shelf_opacity = 0.35
+                    else:
+                        shelf_color = BODY_COLOR
+                        shelf_opacity = BODY_OPACITY
+
+                    shelf_depth = W
+                    fig3d.add_trace(cuboid_mesh_for(
+                        shelf_width, max(0.0, shelf_depth - 0.01), s['thickness']*unit_factor, (shelf_x_start, o[1], sh_z),
+                        color=shelf_color,
+                        opacity=shelf_opacity,
+                        showlegend=False
+                    ))
 
             if 'joues' in cab_render and cab_render['joues']:
                 JOUES_COLOR = "#C8A96E"
