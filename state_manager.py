@@ -920,16 +920,17 @@ def _build_cabinet_from_web_config(payload: dict):
             boundary_candidates_left_x.append(left_x)
 
     # Dédoublonnage tolérant des candidats.
+    candidate_merge_tol_mm = max(2.0, inferred_t_mm + 2.0)
     unique_candidates = []
     for x_left in sorted(boundary_candidates_left_x):
-        if not unique_candidates or abs(unique_candidates[-1] - x_left) > max(2.0, inferred_t_mm * 0.5):
+        if not unique_candidates or abs(unique_candidates[-1] - x_left) > candidate_merge_tol_mm:
             unique_candidates.append(x_left)
 
     for x_left in unique_candidates:
         sep_center_x = x_left + inferred_t_mm / 2.0
         existing_divider = None
         for div in cabinet['vertical_dividers']:
-            if abs(float(div.get('position_x', 0.0)) - sep_center_x) <= max(2.0, inferred_t_mm * 0.5):
+            if abs(float(div.get('position_x', 0.0)) - sep_center_x) <= candidate_merge_tol_mm:
                 existing_divider = div
                 break
 
@@ -951,6 +952,73 @@ def _build_cabinet_from_web_config(payload: dict):
             existing_divider['top_y'] = interior_h_mm
             existing_divider['_force_full_height'] = True
             existing_divider['_imported_separator'] = True
+
+    divider_match_tol_mm = max(2.0, inferred_t_mm * 0.5)
+
+    def _should_expand_divider_to_double(divider: dict) -> bool:
+        div_center = float(divider.get('position_x', 0.0))
+        div_thickness = max(1.0, float(divider.get('thickness', inferred_t_mm)))
+        div_left = div_center - div_thickness / 2.0
+        div_right = div_center + div_thickness / 2.0
+
+        left_drawers = []
+        right_drawers = []
+        for pending in pending_drawers:
+            x_left = float(pending.get('x_left_mm', 0.0))
+            x_right = float(pending.get('x_right_mm', 0.0))
+            y_bottom = float(pending.get('y_bottom_mm', 0.0))
+            y_top = y_bottom + float(pending.get('height_mm', 0.0))
+            if x_left < div_center and abs(x_right - div_center) <= div_thickness + divider_match_tol_mm:
+                left_drawers.append((y_bottom, y_top))
+            if x_right > div_center and abs(x_left - div_center) <= div_thickness + divider_match_tol_mm:
+                right_drawers.append((y_bottom, y_top))
+
+        for left_bottom, left_top in left_drawers:
+            for right_bottom, right_top in right_drawers:
+                overlap_y = min(left_top, right_top) - max(left_bottom, right_bottom)
+                if overlap_y > divider_match_tol_mm:
+                    return True
+        return False
+
+    expanded_dividers = []
+    for divider in sorted(cabinet['vertical_dividers'], key=lambda d: float(d.get('position_x', 0.0))):
+        if not _should_expand_divider_to_double(divider):
+            expanded_dividers.append(divider)
+            continue
+
+        div_thickness = max(1.0, float(divider.get('thickness', inferred_t_mm)))
+        div_center = float(divider.get('position_x', 0.0))
+        left_divider = copy.deepcopy(divider)
+        right_divider = copy.deepcopy(divider)
+        left_divider['position_x'] = div_center - div_thickness / 2.0
+        right_divider['position_x'] = div_center + div_thickness / 2.0
+        left_divider['_imported_double_divider'] = True
+        right_divider['_imported_double_divider'] = True
+        expanded_dividers.extend([left_divider, right_divider])
+
+    deduped_dividers = []
+    final_divider_tol_mm = max(1.0, inferred_t_mm * 0.25)
+    for divider in sorted(expanded_dividers, key=lambda d: float(d.get('position_x', 0.0))):
+        divider_x = float(divider.get('position_x', 0.0))
+        existing_divider = None
+        for kept in deduped_dividers:
+            if abs(float(kept.get('position_x', 0.0)) - divider_x) <= final_divider_tol_mm:
+                existing_divider = kept
+                break
+
+        if existing_divider is None:
+            deduped_dividers.append(divider)
+            continue
+
+        existing_divider['bottom_y'] = min(float(existing_divider.get('bottom_y', 0.0)), float(divider.get('bottom_y', 0.0)))
+        existing_divider['top_y'] = max(float(existing_divider.get('top_y', 0.0)), float(divider.get('top_y', 0.0)))
+        existing_divider['thickness'] = max(float(existing_divider.get('thickness', inferred_t_mm)), float(divider.get('thickness', inferred_t_mm)))
+        existing_divider['_force_full_height'] = bool(existing_divider.get('_force_full_height', False) or divider.get('_force_full_height', False))
+        existing_divider['_imported_separator'] = True
+        if divider.get('_imported_double_divider'):
+            existing_divider['_imported_double_divider'] = True
+
+    cabinet['vertical_dividers'] = deduped_dividers
 
     cabinet['door_props'] = door_props
     has_native_import_elements = bool(cabinet['vertical_dividers'] or cabinet['shelves'] or pending_drawers or pending_doors)
@@ -1070,6 +1138,14 @@ def _build_cabinet_from_web_config(payload: dict):
                 break
 
         chosen_zone = exact_zone
+        if chosen_zone is not None:
+            dr['zone_id'] = chosen_zone['id']
+            dr['stored_zone_coords'] = {
+                'x_min': chosen_zone['x_min'],
+                'x_max': chosen_zone['x_max'],
+                'y_min': chosen_zone['y_min'],
+                'y_max': chosen_zone['y_max'],
+            }
         if chosen_zone is None:
             best_zone = None
             best_score = 0.0
