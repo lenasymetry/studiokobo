@@ -277,18 +277,24 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
     #  Génération de la géométrie pour chaque caisson                      #
     # ------------------------------------------------------------------ #
     for i, cabinet in enumerate(scene_cabinets):
-        dims = cabinet["dims"]
-        L  = float(dims["L_raw"])    # largeur totale
-        W  = float(dims["W_raw"])    # profondeur totale
-        H  = float(dims["H_raw"])    # hauteur totale
-        tl = float(dims["t_lr_raw"]) # épaisseur montants gauche/droit
-        tb = float(dims["t_fb_raw"]) # épaisseur fond (panneau arrière)
-        tt = float(dims["t_tb_raw"]) # épaisseur traverses haut/bas
+        if not isinstance(cabinet, dict):
+            continue
+
+        dims = cabinet.get("dims", {}) or {}
+        L  = float(dims.get("L_raw", 0.0) or 0.0)    # largeur totale
+        W  = float(dims.get("W_raw", 0.0) or 0.0)    # profondeur totale
+        H  = float(dims.get("H_raw", 0.0) or 0.0)    # hauteur totale
+        tl = float(dims.get("t_lr_raw", 19.0) or 19.0) # épaisseur montants gauche/droit
+        tb = float(dims.get("t_fb_raw", 3.0) or 3.0)   # épaisseur fond (panneau arrière)
+        tt = float(dims.get("t_tb_raw", 19.0) or 19.0) # épaisseur traverses haut/bas
+
+        if L <= 0.0 or W <= 0.0 or H <= 0.0:
+            continue
 
         ox, oy, oz = origins[i]
 
         # Fileur : réduction de la largeur effective du caisson
-        _dp_f = cabinet.get("door_props", {})
+        _dp_f = cabinet.get("door_props", {}) or {}
         _fileur_w_skp = float(_dp_f.get("fileur_width", 0))
         if _fileur_w_skp > 0:
             L = L - _fileur_w_skp
@@ -393,6 +399,7 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
                       sh_w, max(0.0, sh_depth), sh_th)
 
         # ── Porte(s) importee(s) explicites ─────────────────────────────
+        door_props_for_fileur = cabinet.get("door_props", {}) or {}
         imported_doors = cabinet.get("imported_doors", []) or []
         dp = None
         if imported_doors:
@@ -539,16 +546,16 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
                       mat="mat_drawer")
 
         # ── Fileur (élément indépendant à côté du caisson) ─────────────
-        fileur_w = float(dp.get("fileur_width", 0))
+        fileur_w = float(door_props_for_fileur.get("fileur_width", 0) or 0)
         if fileur_w > 0:
             fil_th   = 19.0              # épaisseur panneau fileur
-            fil_gap  = float(dp.get("door_gap", 2.0))
+            fil_gap  = float(door_props_for_fileur.get("door_gap", 2.0) or 2.0)
             # Hauteur = même que la porte (H - 2*gap standard)
             fil_H    = H - 2.0 * fil_gap
             fil_z    = oz + fil_gap
             # Côté ouverture (côté libre de la porte)
             # ox et L sont déjà ajustés → le fileur est adjacent au caisson réduit
-            if dp.get("door_opening", "right") == "right":
+            if door_props_for_fileur.get("door_opening", "right") == "right":
                 # Ouverture à droite → fileur à droite du caisson réduit
                 fil_x = ox + L
             else:
