@@ -70,6 +70,175 @@ def _generate_and_store_hole_counts():
     st.session_state['hole_counts_scene_json'] = _scene_to_json(scene)
 
 
+def _generate_and_store_exports(all_parts, selected_materials=None):
+    """Génère les livrables et stocke les résultats en session."""
+    scene = st.session_state.get('scene_cabinets', [])
+    indices = list(range(len(scene)))
+
+    selected_materials = _normalize_materials_list(selected_materials)
+    material_filter_key = _build_material_filter_key(selected_materials)
+
+    filtered_parts = list(all_parts or [])
+    if selected_materials:
+        selected_set = set(selected_materials)
+        filtered_parts = [
+            part for part in filtered_parts
+            if str(part.get("Matière", "")).strip() in selected_set
+        ]
+
+    html_data = None
+    html_ok = False
+    dwg_data = None
+    dwg_ok = False
+    dwg_filename = None
+    xls_data = None
+    skp_has_doors = False
+    skp_closed_data = None
+    skp_closed_ok = False
+    skp_open_data = None
+    skp_open_ok = False
+    views3d_pdf_data = None
+    views3d_pdf_ok = False
+    rb_data = None
+    rb_ok = False
+    views3d_error = None
+    xls_error = None
+    skp_error = None
+
+    try:
+        from export_manager import generate_stacked_html_plans
+
+        html_data, html_ok = generate_stacked_html_plans(
+            scene,
+            indices,
+            output_format="html",
+        )
+    except Exception as exc:
+        html_data = str(exc).encode("utf-8", errors="ignore")
+        html_ok = False
+
+    try:
+        from export_manager import generate_stacked_html_plans
+
+        dwg_data, dwg_ok = generate_stacked_html_plans(
+            scene,
+            indices,
+            output_format="dxf",
+        )
+        dwg_filename = f"Plans_{st.session_state.project_name.replace(' ', '_')}.dxf"
+    except Exception as exc:
+        dwg_data = str(exc).encode("utf-8", errors="ignore")
+        dwg_ok = False
+        dwg_filename = None
+
+    try:
+        from excel_export import create_styled_excel
+
+        export_df = pd.DataFrame(filtered_parts)
+        project_info = {
+            "project_name": st.session_state.get("project_name", "Nouveau Projet"),
+            "client": st.session_state.get("client", ""),
+            "adresse_chantier": st.session_state.get("adresse_chantier", ""),
+            "ref_chantier": st.session_state.get("ref_chantier", ""),
+            "date": datetime.date.today().strftime("%d/%m/%Y"),
+            "date_souhaitee": st.session_state.get("date_souhaitee", ""),
+            "chant_mm": st.session_state.get("chant_mm", ""),
+            "decor_chant": st.session_state.get("decor_chant", ""),
+        }
+        xls_data = create_styled_excel(project_info, export_df)
+    except Exception as exc:
+        xls_error = str(exc)
+        xls_data = None
+
+    try:
+        from sketchup_export import generate_sketchup_collada
+
+        skp_has_doors = any(
+            bool((cab.get("door_props") or {}).get("has_door"))
+            for cab in scene
+            if isinstance(cab, dict)
+        )
+        skp_closed_data = generate_sketchup_collada(scene, door_mode="closed")
+        skp_closed_ok = bool(skp_closed_data)
+
+        if skp_has_doors:
+            skp_open_data = generate_sketchup_collada(scene, door_mode="ajar")
+            skp_open_ok = bool(skp_open_data)
+    except Exception as exc:
+        skp_error = str(exc)
+        skp_has_doors = False
+        skp_closed_data = None
+        skp_closed_ok = False
+        skp_open_data = None
+        skp_open_ok = False
+
+    try:
+        from views_3d_export import generate_3d_views_pdf, generate_sketchup_ruby_script
+
+        views3d_pdf_data = generate_3d_views_pdf(
+            scene,
+            project_name=st.session_state.get("project_name", "Meuble"),
+            client=st.session_state.get("client", ""),
+            date_str=datetime.date.today().strftime("%d/%m/%Y"),
+        )
+        views3d_pdf_ok = bool(views3d_pdf_data)
+        rb_data = generate_sketchup_ruby_script(scene)
+        rb_ok = bool(rb_data)
+    except Exception as exc:
+        views3d_error = str(exc)
+        views3d_pdf_data = None
+        views3d_pdf_ok = False
+        rb_data = None
+        rb_ok = False
+
+    st.session_state['exports_html_data'] = html_data
+    st.session_state['exports_html_ok'] = bool(html_ok)
+    st.session_state['exports_dwg_data'] = dwg_data
+    st.session_state['exports_dwg_ok'] = bool(dwg_ok)
+    st.session_state['exports_dwg_filename'] = dwg_filename
+    st.session_state['exports_xls_data'] = xls_data
+    st.session_state['exports_skp_has_doors'] = skp_has_doors
+    st.session_state['exports_skp_closed_data'] = skp_closed_data
+    st.session_state['exports_skp_closed_ok'] = skp_closed_ok
+    st.session_state['exports_skp_open_data'] = skp_open_data
+    st.session_state['exports_skp_open_ok'] = skp_open_ok
+    st.session_state['exports_skp_error'] = skp_error
+    st.session_state['exports_3d_pdf_data'] = views3d_pdf_data
+    st.session_state['exports_3d_pdf_ok'] = views3d_pdf_ok
+    st.session_state['exports_rb_data'] = rb_data
+    st.session_state['exports_rb_ok'] = rb_ok
+    st.session_state['exports_3d_error'] = views3d_error
+    st.session_state['exports_xls_error'] = xls_error
+
+    st.session_state['exports_scene_json'] = _scene_to_json(scene)
+    st.session_state['exports_material_filter_key'] = material_filter_key
+
+
+def _build_deliverables_archive(project_name, xls_data, dxf_data, dxf_filename=None, selected_materials=None):
+    """Construit une archive ZIP avec les livrables principaux (Excel + DXF)."""
+    if not xls_data or not dxf_data:
+        return None, None
+
+    safe_project = str(project_name or "Projet").strip().replace(" ", "_")
+    dxf_name = dxf_filename or f"Plans_{safe_project}.dxf"
+    xls_name = f"Projet_{safe_project}.xlsx"
+
+    selected_materials = _normalize_materials_list(selected_materials)
+    suffix = ""
+    if selected_materials:
+        mat_slug = "-".join(m.replace(" ", "_") for m in sorted(selected_materials))
+        suffix = f"_{mat_slug}"
+
+    zip_name = f"Livrables_{safe_project}{suffix}.zip"
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(xls_name, xls_data)
+        zf.writestr(dxf_name, dxf_data)
+
+    return buffer.getvalue(), zip_name
+
+
 def _dxf_text_value(entity):
     try:
         if entity.dxftype() == "MTEXT":
@@ -203,6 +372,8 @@ def _build_plotly_preview_from_dxf_window(msp, title, x_min, x_max, y_min, y_max
 def _build_double_cachepied_preview_from_dxf(selected_cab, cab_number):
     if not EZDXF_PREVIEW_AVAILABLE:
         return []
+
+    from export_manager import generate_stacked_html_plans
 
     payload, ok = generate_stacked_html_plans([selected_cab], [cab_number], output_format="dxf")
     if not ok:
@@ -533,6 +704,12 @@ def _render_exports(all_parts):
             )
         else:
             st.info("Le téléchargement groupé sera disponible dès que l'Excel et le DXF seront tous les deux générés.")
+            if not xls_data:
+                xls_err = st.session_state.get('exports_xls_error')
+                if xls_err:
+                    st.caption(f"Excel indisponible: {xls_err}")
+            if not (dwg_ok and dwg_data):
+                st.caption("DXF indisponible: vérifiez le message d'erreur de l'export DXF ci-dessous.")
 
         dl_col1, dl_col2, dl_col3, dl_col4 = st.columns([1, 1, 1, 1], gap="small")
         with dl_col1:
@@ -591,6 +768,10 @@ def _render_exports(all_parts):
                 )
             else:
                 st.warning("⚠️ Export SketchUp indisponible.")
+                skp_err = st.session_state.get('exports_skp_error')
+                if skp_err:
+                    with st.expander("Détails export SketchUp"):
+                        st.code(skp_err)
 
             if skp_has_doors:
                 if skp_open_ok and skp_open_data:
