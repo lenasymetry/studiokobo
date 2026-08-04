@@ -135,17 +135,38 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
         from excel_export import create_styled_excel
 
         export_df = pd.DataFrame(filtered_parts)
+        date_souhaitee_value = st.session_state.get("date_souhaitee", "")
+        if hasattr(date_souhaitee_value, "isoformat"):
+            date_souhaitee_iso = date_souhaitee_value.isoformat()
+        else:
+            date_souhaitee_iso = str(date_souhaitee_value or "")
+
         project_info = {
             "project_name": st.session_state.get("project_name", "Nouveau Projet"),
             "client": st.session_state.get("client", ""),
             "adresse_chantier": st.session_state.get("adresse_chantier", ""),
             "ref_chantier": st.session_state.get("ref_chantier", ""),
             "date": datetime.date.today().strftime("%d/%m/%Y"),
-            "date_souhaitee": st.session_state.get("date_souhaitee", ""),
+            "date_souhaitee": date_souhaitee_value,
             "chant_mm": st.session_state.get("chant_mm", ""),
             "decor_chant": st.session_state.get("decor_chant", ""),
         }
-        xls_data = create_styled_excel(project_info, export_df)
+        save_data = {
+            "project_name": st.session_state.get("project_name", "Nouveau Projet"),
+            "client": st.session_state.get("client", ""),
+            "adresse_chantier": st.session_state.get("adresse_chantier", ""),
+            "ref_chantier": st.session_state.get("ref_chantier", ""),
+            "telephone": st.session_state.get("telephone", ""),
+            "date_souhaitee": date_souhaitee_iso,
+            "panneau_decor": st.session_state.get("panneau_decor", ""),
+            "chant_mm": st.session_state.get("chant_mm", ""),
+            "decor_chant": st.session_state.get("decor_chant", ""),
+            "has_feet": bool(st.session_state.get("has_feet", False)),
+            "foot_height": float(st.session_state.get("foot_height", 80.0) or 80.0),
+            "foot_diameter": float(st.session_state.get("foot_diameter", 50.0) or 50.0),
+            "scene_cabinets": st.session_state.get("scene_cabinets", []),
+        }
+        xls_data = create_styled_excel(project_info, export_df, save_data_dict=save_data)
     except Exception as exc:
         xls_error = str(exc)
         xls_data = None
@@ -807,6 +828,12 @@ def _render_exports(all_parts):
                 st.warning("⚠️ PDF vues 3D indisponible.")
                 err_3d = st.session_state.get('exports_3d_error')
                 if err_3d:
+                    if "No module named 'matplotlib'" in err_3d or 'No module named "matplotlib"' in err_3d:
+                        st.info(
+                            "Le module matplotlib est absent de l'interpréteur Python qui exécute Streamlit. "
+                            "Lancez l'application avec l'interpréteur conda qui inclut matplotlib: "
+                            "`/Applications/anaconda3/bin/streamlit run app.py`."
+                        )
                     with st.expander("Détails de l'erreur"):
                         st.code(err_3d)
 
