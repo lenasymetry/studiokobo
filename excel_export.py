@@ -30,6 +30,17 @@ def create_styled_excel(project_info_dict, df_all_parts, save_data_dict=None):
 
     df_export = df_all_parts.copy()
 
+    if df_export.empty:
+        ws = wb.create_sheet(title="Débit")
+        ws['A1'] = "FEUILLE DE DEBIT"
+        ws['A1'].font = font_title_main
+        ws['A3'] = "Aucune pièce à exporter pour le filtre matière sélectionné."
+        ws['A3'].font = font_std
+        ws['A5'] = f"Projet : {project_info_dict.get('project_name', '')}"
+        ws['A6'] = f"Date : {project_info_dict.get('date', '')}"
+        wb.save(output)
+        return output.getvalue()
+
     # Sécurité export: les plinthes doivent toujours avoir le chant avant.
     if "Référence Pièce" in df_export.columns:
         plinthe_mask = df_export["Référence Pièce"].astype(str).str.lower().str.contains("plinthe", na=False)
