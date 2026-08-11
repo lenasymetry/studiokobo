@@ -27,7 +27,22 @@ if APP_DIR not in sys.path:
 
 from state_manager import *
 from project_definitions import *
-from geometry_helpers import cuboid_mesh_for, add_zone_outlines_3d
+from geometry_helpers import (
+    cuboid_mesh_for,
+    add_zone_outlines_3d,
+    # Ces quatre-là étaient APPELÉES sans être importées : le script levait un
+    # NameError et s'arrêtait net, donc tout ce qui suit (vue 3D, exports,
+    # feuille de débit) n'était plus rendu — d'où l'impression que la page se
+    # réinitialise. Chacune n'est atteinte que dans un cas précis :
+    #   cylinder_mesh_for               -> pieds activés
+    #   check_element_placement_validity-> étagère / étagère verticale en pose
+    #   add_hatched_zones_3d            -> montant secondaire créant des zones
+    #   add_zone_debug_boxes_3d         -> affichage des zones de contrôle
+    cylinder_mesh_for,
+    check_element_placement_validity,
+    add_hatched_zones_3d,
+    add_zone_debug_boxes_3d,
+)
 from machining_logic import calculate_all_zones_2d, calculate_origins_recursively
 from utils import calculate_available_space_between_horizontal_shelves
 
@@ -103,7 +118,6 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
     rb_ok = False
     views3d_error = None
     xls_error = None
-    skp_error = None
 
     try:
         from export_manager import generate_stacked_html_plans
@@ -135,38 +149,33 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
         from excel_export import create_styled_excel
 
         export_df = pd.DataFrame(filtered_parts)
-        date_souhaitee_value = st.session_state.get("date_souhaitee", "")
-        if hasattr(date_souhaitee_value, "isoformat"):
-            date_souhaitee_iso = date_souhaitee_value.isoformat()
-        else:
-            date_souhaitee_iso = str(date_souhaitee_value or "")
-
         project_info = {
             "project_name": st.session_state.get("project_name", "Nouveau Projet"),
             "client": st.session_state.get("client", ""),
             "adresse_chantier": st.session_state.get("adresse_chantier", ""),
             "ref_chantier": st.session_state.get("ref_chantier", ""),
             "date": datetime.date.today().strftime("%d/%m/%Y"),
-            "date_souhaitee": date_souhaitee_value,
+            "date_souhaitee": st.session_state.get("date_souhaitee", ""),
             "chant_mm": st.session_state.get("chant_mm", ""),
             "decor_chant": st.session_state.get("decor_chant", ""),
         }
-        save_data = {
+        date_souhaitee_val = st.session_state.get("date_souhaitee", "")
+        save_data_export = {
             "project_name": st.session_state.get("project_name", "Nouveau Projet"),
             "client": st.session_state.get("client", ""),
             "adresse_chantier": st.session_state.get("adresse_chantier", ""),
             "ref_chantier": st.session_state.get("ref_chantier", ""),
             "telephone": st.session_state.get("telephone", ""),
-            "date_souhaitee": date_souhaitee_iso,
+            "date_souhaitee": date_souhaitee_val.isoformat() if hasattr(date_souhaitee_val, "isoformat") else date_souhaitee_val,
             "panneau_decor": st.session_state.get("panneau_decor", ""),
             "chant_mm": st.session_state.get("chant_mm", ""),
             "decor_chant": st.session_state.get("decor_chant", ""),
-            "has_feet": bool(st.session_state.get("has_feet", False)),
-            "foot_height": float(st.session_state.get("foot_height", 80.0) or 80.0),
-            "foot_diameter": float(st.session_state.get("foot_diameter", 50.0) or 50.0),
-            "scene_cabinets": st.session_state.get("scene_cabinets", []),
+            "has_feet": st.session_state.get("has_feet", False),
+            "foot_height": st.session_state.get("foot_height", 80.0),
+            "foot_diameter": st.session_state.get("foot_diameter", 30.0),
+            "scene_cabinets": scene,
         }
-        xls_data = create_styled_excel(project_info, export_df, save_data_dict=save_data)
+        xls_data = create_styled_excel(project_info, export_df, save_data_export)
     except Exception as exc:
         xls_error = str(exc)
         xls_data = None
@@ -185,8 +194,7 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
         if skp_has_doors:
             skp_open_data = generate_sketchup_collada(scene, door_mode="ajar")
             skp_open_ok = bool(skp_open_data)
-    except Exception as exc:
-        skp_error = str(exc)
+    except Exception:
         skp_has_doors = False
         skp_closed_data = None
         skp_closed_ok = False
@@ -223,7 +231,6 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
     st.session_state['exports_skp_closed_ok'] = skp_closed_ok
     st.session_state['exports_skp_open_data'] = skp_open_data
     st.session_state['exports_skp_open_ok'] = skp_open_ok
-    st.session_state['exports_skp_error'] = skp_error
     st.session_state['exports_3d_pdf_data'] = views3d_pdf_data
     st.session_state['exports_3d_pdf_ok'] = views3d_pdf_ok
     st.session_state['exports_rb_data'] = rb_data
@@ -789,10 +796,6 @@ def _render_exports(all_parts):
                 )
             else:
                 st.warning("⚠️ Export SketchUp indisponible.")
-                skp_err = st.session_state.get('exports_skp_error')
-                if skp_err:
-                    with st.expander("Détails export SketchUp"):
-                        st.code(skp_err)
 
             if skp_has_doors:
                 if skp_open_ok and skp_open_data:
@@ -828,12 +831,6 @@ def _render_exports(all_parts):
                 st.warning("⚠️ PDF vues 3D indisponible.")
                 err_3d = st.session_state.get('exports_3d_error')
                 if err_3d:
-                    if "No module named 'matplotlib'" in err_3d or 'No module named "matplotlib"' in err_3d:
-                        st.info(
-                            "Le module matplotlib est absent de l'interpréteur Python qui exécute Streamlit. "
-                            "Lancez l'application avec l'interpréteur conda qui inclut matplotlib: "
-                            "`/Applications/anaconda3/bin/streamlit run app.py`."
-                        )
                     with st.expander("Détails de l'erreur"):
                         st.code(err_3d)
 
@@ -936,8 +933,8 @@ def calculate_all_project_parts():
         t_lr, t_tb, t_fb = dims['t_lr_raw'], dims['t_tb_raw'], dims['t_fb_raw']
         h_side = dims['H_raw'] 
         L_traverse = max(0.0, L_eff - 2 * t_lr)
-        dim_fond_vertical = dims['H_raw'] - 2.0
-        dim_fond_horizontal = max(0.0, L_eff - 2.0)
+        dim_fond_vertical = dims['H_raw'] - 38.0
+        dim_fond_horizontal = max(0.0, L_eff - 38.0)
         
         panel_dims = {
             "Traverse Bas": (L_traverse, dims['W_raw'], t_tb),
@@ -1199,6 +1196,11 @@ def calculate_all_project_parts():
                     drawer_bottom_width = max(0.0, drawer_face_width - 49.0)
                     drawer_bottom_depth = float(dims['W_raw']) - (20.0 + t_fb_raw)
                 
+                # Largeur de la façade (pièce visible) : toujours la largeur totale
+                # du caisson général saisie par l'utilisateur - 4mm, quelle que soit
+                # la zone (les dimensions internes du tiroir restent, elles, basées sur la zone).
+                facade_largeur_mm = max(0.0, L_eff - 4.0)
+
                 cav, car, cg, cd = get_automatic_edge_banding("Façade")
                 facade_ref = f"Façade Tiroir {drawer_idx+1} (C{i})"
                 usinage_facade = "CF plan" if has_holes_for_piece("Façade Tiroir", cabinet) else ""
@@ -1209,7 +1211,7 @@ def calculate_all_project_parts():
                     "Caisson": f"C{i}",
                     "Qté": 1,
                     "Longueur (mm)": drp.get('drawer_face_H_raw', 150.0),
-                    "Largeur (mm)": drawer_face_width,
+                    "Largeur (mm)": facade_largeur_mm,
                     "Epaisseur": drp.get('drawer_face_thickness', 19.0),
                     "Chant Avant": cav, "Chant Arrière": car, "Chant Gauche": cg, "Chant Droit": cd,
                     "Usinage": usinage_facade
@@ -1258,9 +1260,9 @@ def calculate_all_project_parts():
             for s_idx, s in enumerate(cabinet['shelves']):
                 s_type = s.get('shelf_type', 'mobile')
                 s_th = float(s.get('thickness', 19.0))
-                # Règle demandée: étagère = dimensions exactes de traverse du caisson.
+                # Règle demandée: étagère = longueur de la traverse, largeur de la traverse - 19 mm.
                 dim_L = L_traverse
-                dim_W = dims['W_raw']
+                dim_W = max(0.0, dims['W_raw'] - 19.0)
                 
                 shelf_dims_cache[f"C{i}_S{s_idx}"] = (dim_L, dim_W)
                 
@@ -1335,7 +1337,38 @@ def calculate_all_project_parts():
                     "Usinage": usinage_divider
                 })
             
-    return all_parts, shelf_dims_cache
+    # Fusion des lignes strictement identiques (même référence, mêmes dimensions,
+    # même matière, mêmes chants, même usinage) : on cumule la quantité au lieu
+    # de répéter des lignes identiques en quantité 1.
+    merged_parts = []
+    merged_index = {}
+    for part in all_parts:
+        key = (
+            part.get("Référence Pièce", ""),
+            round(float(part.get("Longueur (mm)", 0) or 0), 1),
+            round(float(part.get("Largeur (mm)", 0) or 0), 1),
+            round(float(part.get("Epaisseur", 0) or 0), 1),
+            part.get("Matière", ""),
+            bool(part.get("Chant Avant", False)),
+            bool(part.get("Chant Arrière", False)),
+            bool(part.get("Chant Gauche", False)),
+            bool(part.get("Chant Droit", False)),
+            part.get("Usinage", ""),
+        )
+        existing = merged_index.get(key)
+        if existing is not None:
+            existing["Qté"] = existing.get("Qté", 1) + part.get("Qté", 1)
+            existing_caissons = [c.strip() for c in str(existing.get("Caisson", "")).split(",") if c.strip()]
+            new_caisson = str(part.get("Caisson", "")).strip()
+            if new_caisson and new_caisson not in existing_caissons:
+                existing_caissons.append(new_caisson)
+                existing["Caisson"] = ", ".join(existing_caissons)
+        else:
+            new_part = part.copy()
+            merged_index[key] = new_part
+            merged_parts.append(new_part)
+
+    return merged_parts, shelf_dims_cache
 
 
 def get_cached_project_parts():
@@ -1383,6 +1416,66 @@ def load_image_base64(filename):
 
 # Charger le logo
 logo_base64 = load_image_base64("logo.png")
+
+# ── Couleur d'accentuation KOBO ──────────────────────────────────────────────
+# `.streamlit/config.toml` fixe déjà `primaryColor`, mais ce réglage est
+# écrasé si le navigateur a mémorisé un thème choisi dans le menu de Streamlit
+# (⋮ > Settings > Theme) : la couleur restait alors le rouge d'origine malgré
+# la configuration serveur. Ces règles-ci sont appliquées à la page, donc
+# indépendantes de ce thème mémorisé.
+KOBO_ORANGE = "#F04525"
+KOBO_ORANGE_HOVER = "#D33C1F"
+
+st.markdown(
+    f"""
+    <style>
+    /* Boutons principaux et validations de formulaire.
+       Deux jeux de sélecteurs : Streamlit a renommé l'attribut des boutons
+       entre les versions (`kind="primary"` avant, `data-testid` ensuite).
+       Les deux sont listés pour que la couleur tienne quelle que soit la
+       version installée sur la machine. */
+    button[kind="primary"], button[kind="primaryFormSubmit"],
+    [data-testid="stBaseButton-primary"],
+    [data-testid="stBaseButton-primaryFormSubmit"] {{
+        background-color: {KOBO_ORANGE} !important;
+        border-color: {KOBO_ORANGE} !important;
+    }}
+    button[kind="primary"] p, button[kind="primaryFormSubmit"] p,
+    [data-testid="stBaseButton-primary"] p,
+    [data-testid="stBaseButton-primaryFormSubmit"] p {{
+        color: #FFFFFF !important;
+    }}
+    button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover,
+    [data-testid="stBaseButton-primary"]:hover,
+    [data-testid="stBaseButton-primaryFormSubmit"]:hover {{
+        background-color: {KOBO_ORANGE_HOVER} !important;
+        border-color: {KOBO_ORANGE_HOVER} !important;
+    }}
+    /* Les boutons de téléchargement gardent leur habillage clair d'origine */
+    div[data-testid="stDownloadButton"] > button[kind="primary"] {{
+        background: linear-gradient(180deg, #ffffff, #f4f8fc) !important;
+        border-color: #c7d9ea !important;
+    }}
+    div[data-testid="stDownloadButton"] > button[kind="primary"] p {{
+        color: #111111 !important;
+    }}
+    /* Onglet actif : soulignement et libellé */
+    .stTabs [data-baseweb="tab-highlight"] {{
+        background-color: {KOBO_ORANGE} !important;
+    }}
+    .stTabs [aria-selected="true"] {{
+        color: {KOBO_ORANGE} !important;
+    }}
+    /* Cases à cocher, interrupteurs et boutons radio sélectionnés */
+    [data-testid="stCheckbox"] [data-baseweb="checkbox"] [aria-checked="true"],
+    [data-testid="stRadio"] [aria-checked="true"] > div:first-child {{
+        background-color: {KOBO_ORANGE} !important;
+        border-color: {KOBO_ORANGE} !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def _get_expected_password() -> str:
@@ -1463,7 +1556,7 @@ def _render_login_page(logo_data: str | None) -> None:
         if logo_data:
             st.markdown(f'<img class="kb-auth-logo" src="{logo_data}" alt="Logo" />', unsafe_allow_html=True)
         st.markdown('<span class="kb-auth-badge">Acces securise</span>', unsafe_allow_html=True)
-        st.markdown('<h1 class="kb-auth-title">KoboMeuble Studio</h1>', unsafe_allow_html=True)
+        st.markdown('<h1 class="kb-auth-title">Studio KOBO</h1>', unsafe_allow_html=True)
         st.markdown(
             '<p class="kb-auth-sub">Plateforme de conception et de preparation de plans techniques. Entrez le mot de passe pour acceder a l\'interface.</p>',
             unsafe_allow_html=True,
@@ -1572,8 +1665,8 @@ if logo_base64:
     }}
     </style>
     <div class="main-header">
-        <img src="{logo_base64}" alt="Logo KoboMeuble" />
-        <h1>KoboMeuble</h1>
+        <img src="{logo_base64}" alt="Logo KOBO" />
+        <h1>Studio KOBO</h1>
     </div>
     """
 else:
@@ -1640,7 +1733,7 @@ else:
     }
     </style>
     <div class="main-header">
-        <h1>KoboMeuble</h1>
+        <h1>Studio KOBO</h1>
     </div>
     """
 
@@ -1906,8 +1999,15 @@ with col1:
                     if pending and pending.get('cabinet_index') == idx and pending.get('kind') in ('drawer', 'drawer_stack'):
                         p = pending.get('props', {})
                         is_stack_mode = pending.get('kind') == 'drawer_stack' or bool(p.get('_stack_mode'))
-                        st.warning("Pose en cours : le tiroir est en prévisualisation. Cliquez sur **Valider la position** pour le poser définitivement.")
-                        with st.expander("✅ Valider la position (Tiroir)" if not is_stack_mode else "✅ Valider la position (Tiroirs empilés)"):
+                        # Panneau de pose rendu dans un emplacement effaçable : valider ou annuler
+                        # le retire directement, SANS `st.rerun()`. Le clic sur le bouton a déjà
+                        # provoqué un rerun ; en relancer un second remontait la page en haut et
+                        # faisait repartir la barre d'onglets sur le premier onglet.
+                        _pending_slot = st.empty()
+                        _pending_box = _pending_slot.container()
+                        _placement_done = False
+                        _pending_box.warning("Pose en cours : le tiroir est en prévisualisation. Cliquez sur **Valider la position** pour le poser définitivement.")
+                        with _pending_box.expander("✅ Valider la position (Tiroir)" if not is_stack_mode else "✅ Valider la position (Tiroirs empilés)"):
                             all_zones_2d_sel = calculate_all_zones_2d(selected_cab, include_all_elements=False)
                             zone_options = [None] + [z['id'] for z in all_zones_2d_sel]
                             zone_labels = ["Tout le caisson"] + [f"{z['label']} (X:{z['x_min']:.0f}-{z['x_max']:.0f}mm, Y:{z['y_min']:.0f}-{z['y_max']:.0f}mm)" for z in all_zones_2d_sel]
@@ -2110,7 +2210,7 @@ with col1:
                             value=p.get('material_inner', p.get('material', 'Matière Tiroir')),
                             key=f"pending_drawer_material_inner_{idx}",
                         )
-                        c_ok, c_cancel = st.columns(2)
+                        c_ok, c_cancel = _pending_box.columns(2)
                         if c_ok.button("Valider la position", key=f"pending_drawer_validate_{idx}", use_container_width=True, type="primary"):
                             selected_cab.setdefault('drawers', [])
                             # IMPORTANT : Recalculer les zones au moment de la validation (elles ont pu changer)
@@ -2182,10 +2282,12 @@ with col1:
                                     }
                                     selected_cab['drawers'].append(d_copy)
                             st.session_state['pending_placement'] = None
-                            st.rerun()
+                            _placement_done = True
                         if c_cancel.button("Annuler", key=f"pending_drawer_cancel_{idx}", use_container_width=True):
                             st.session_state['pending_placement'] = None
-                            st.rerun()
+                            _placement_done = True
+                        if _placement_done:
+                            _pending_slot.empty()
                     
                     # Afficher la liste des tiroirs existants
                     if 'drawers' in selected_cab and selected_cab['drawers']:
@@ -2437,8 +2539,15 @@ with col1:
                     if pending and pending.get('cabinet_index') == idx and pending.get('kind') in ('shelf', 'shelf_stack'):
                         p = pending.get('props', {})
                         is_stack_mode = pending.get('kind') == 'shelf_stack' or bool(p.get('_stack_mode'))
-                        st.warning("Pose en cours : l'étagère est en prévisualisation. Cliquez sur **Valider la position** pour la poser définitivement.")
-                        with st.expander("✅ Valider la position (Étagères fixes empilées)" if is_stack_mode else "✅ Valider la position (Étagère)"):
+                        # Panneau de pose rendu dans un emplacement effaçable : valider ou annuler
+                        # le retire directement, SANS `st.rerun()`. Le clic sur le bouton a déjà
+                        # provoqué un rerun ; en relancer un second remontait la page en haut et
+                        # faisait repartir la barre d'onglets sur le premier onglet.
+                        _pending_slot = st.empty()
+                        _pending_box = _pending_slot.container()
+                        _placement_done = False
+                        _pending_box.warning("Pose en cours : l'étagère est en prévisualisation. Cliquez sur **Valider la position** pour la poser définitivement.")
+                        with _pending_box.expander("✅ Valider la position (Étagères fixes empilées)" if is_stack_mode else "✅ Valider la position (Étagère)"):
                             all_zones_2d_sel = calculate_all_zones_2d(selected_cab, include_all_elements=False)
                             zone_options = [None] + [z['id'] for z in all_zones_2d_sel]
                             zone_labels = ["Tout le caisson"] + [f"{z['label']} (X:{z['x_min']:.0f}-{z['x_max']:.0f}mm, Y:{z['y_min']:.0f}-{z['y_max']:.0f}mm)" for z in all_zones_2d_sel]
@@ -2548,10 +2657,12 @@ with col1:
                                     selected_cab['shelves'].append(copy.deepcopy(p))
 
                                 st.session_state['pending_placement'] = None
-                                st.rerun()
+                                _placement_done = True
                             if c_cancel.button("Annuler", key=f"pending_shelf_cancel_{idx}", use_container_width=True):
                                 st.session_state['pending_placement'] = None
-                                st.rerun()
+                                _placement_done = True
+                        if _placement_done:
+                            _pending_slot.empty()
                     if 'shelves' in selected_cab:
                         # Calculer toutes les zones 2D disponibles (SANS inclure les éléments sans zone_id)
                         # Pour le choix de zone, on veut voir les zones existantes AVANT le placement
@@ -2607,8 +2718,15 @@ with col1:
                         p = pending.get('props', {})
                         is_double = pending.get('kind') == 'vertical_divider_double' or bool(p.get('double'))
                         txt_title = "✅ Valider la position (Double montant secondaire)" if is_double else "✅ Valider la position (Montant secondaire)"
-                        st.warning("Pose en cours : le montant secondaire est en prévisualisation. Cliquez sur **Valider la position** pour le poser définitivement.")
-                        with st.expander(txt_title):
+                        # Panneau de pose rendu dans un emplacement effaçable : valider ou annuler
+                        # le retire directement, SANS `st.rerun()`. Le clic sur le bouton a déjà
+                        # provoqué un rerun ; en relancer un second remontait la page en haut et
+                        # faisait repartir la barre d'onglets sur le premier onglet.
+                        _pending_slot = st.empty()
+                        _pending_box = _pending_slot.container()
+                        _placement_done = False
+                        _pending_box.warning("Pose en cours : le montant secondaire est en prévisualisation. Cliquez sur **Valider la position** pour le poser définitivement.")
+                        with _pending_box.expander(txt_title):
                             existing_count = len(selected_cab.get('vertical_dividers', []))
                             is_first = (existing_count == 0)
                             all_zones_2d_sel = calculate_all_zones_2d(selected_cab, include_all_elements=False)
@@ -2710,10 +2828,12 @@ with col1:
                                         }
                                     selected_cab['vertical_dividers'].append(copy.deepcopy(p))
                                 st.session_state['pending_placement'] = None
-                                st.rerun()
+                                _placement_done = True
                             if c_cancel.button("Annuler", key=f"pending_divider_cancel_{idx}", use_container_width=True):
                                 st.session_state['pending_placement'] = None
-                                st.rerun()
+                                _placement_done = True
+                        if _placement_done:
+                            _pending_slot.empty()
                     
                     # Calculer toutes les zones 2D (X et Y combinés) - SANS inclure les éléments sans zone_id
                     all_zones_2d = calculate_all_zones_2d(selected_cab, include_all_elements=False)
@@ -2798,8 +2918,15 @@ with col1:
                     pending = st.session_state.get('pending_placement')
                     if pending and pending.get('cabinet_index') == idx and pending.get('kind') == 'vertical_shelf':
                         p = pending.get('props', {})
-                        st.warning("Pose en cours : l'étagère verticale est en prévisualisation. Cliquez sur **Valider la position** pour la poser définitivement.")
-                        with st.expander("✅ Valider la position (Étagère verticale)"):
+                        # Panneau de pose rendu dans un emplacement effaçable : valider ou annuler
+                        # le retire directement, SANS `st.rerun()`. Le clic sur le bouton a déjà
+                        # provoqué un rerun ; en relancer un second remontait la page en haut et
+                        # faisait repartir la barre d'onglets sur le premier onglet.
+                        _pending_slot = st.empty()
+                        _pending_box = _pending_slot.container()
+                        _placement_done = False
+                        _pending_box.warning("Pose en cours : l'étagère verticale est en prévisualisation. Cliquez sur **Valider la position** pour la poser définitivement.")
+                        with _pending_box.expander("✅ Valider la position (Étagère verticale)"):
                             all_zones_2d_sel = calculate_all_zones_2d(selected_cab, include_all_elements=False)
                             if all_zones_2d_sel:
                                 zone_options = [z['id'] for z in all_zones_2d_sel]
@@ -2911,10 +3038,12 @@ with col1:
                                         }
                                 selected_cab['vertical_shelves'].append(copy.deepcopy(p))
                                 st.session_state['pending_placement'] = None
-                                st.rerun()
+                                _placement_done = True
                             if c_cancel.button("Annuler", key=f"pending_vs_cancel_{idx}", use_container_width=True):
                                 st.session_state['pending_placement'] = None
-                                st.rerun()
+                                _placement_done = True
+                        if _placement_done:
+                            _pending_slot.empty()
                     
                     if 'vertical_shelves' in selected_cab and selected_cab['vertical_shelves']:
                         for i, vs in enumerate(selected_cab['vertical_shelves']):

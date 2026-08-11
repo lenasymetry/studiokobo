@@ -803,7 +803,7 @@ def _build_door_face_holes(door_width, hinge_y_positions, hinge_side):
     return holes
 
 
-def _redistribute_hinge_y_positions_with_edge_offset(hinge_y_positions, door_height, edge, extra_offset_mm=70.0):
+def _redistribute_hinge_y_positions_with_edge_offset(hinge_y_positions, door_height, edge, extra_offset_mm=80.0):
     """Apply extra edge offset to one extreme hinge and redistribute evenly.
 
     edge='min': offset from lower edge (y=0) is increased by extra_offset_mm.
@@ -852,6 +852,14 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
     dxf_doc = None
     dxf_msp = None
     dxf_plan_index = 0
+    # Contrôle du DXF : `plans` est reconstruit À CHAQUE CAISSON, alors que
+    # `dxf_plan_index` compte les layouts de TOUTE la scène. Comparer les deux
+    # après la boucle revenait donc à confronter le dernier caisson au total
+    # général — d'où une « validation » qui échouait dès qu'il y avait plus
+    # d'un caisson, sur un export pourtant complet. On cumule ce qui est
+    # réellement attendu, caisson par caisson.
+    dxf_expected_count = 0
+    dxf_expected_titles: list = []
     figures_out = []
     if output_format == 'dxf':
         if not EZDXF_AVAILABLE:
@@ -1044,9 +1052,8 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
             h_side = H_raw
             L_trav = L_raw - 2 * t_lr
             W_mont = W_raw
-            # Fond en applique: panneau arrière à dimensions extérieures du caisson.
-            W_back = L_raw
-            H_back = H_raw
+            W_back = L_raw - 2.0
+            H_back = H_raw - 2.0
             
             ys_vis, ys_dowel = calculate_hole_positions(W_raw)
             holes_mg, holes_md = [], []
@@ -1534,18 +1541,18 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
 
                     if dp.get('door_model') == 'floor_length':
                         # Double + cache-pieds: two distinct mirrored variants.
-                        # Required rule: new offset = existing offset + 70 mm on one edge,
+                        # Required rule: new offset = existing offset + 80 mm on one edge,
                         # then redistribute all hinge center positions uniformly.
                         c_p = {"Chant Avant":True, "Chant Arrière":True, "Chant Gauche":True, "Chant Droit":True}
 
                         title_left = f"PORTE DROITE (C{cab_idx})"
-                        y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=70.0)
+                        y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=80.0)
                         holes_p_left = _build_door_face_holes(dW_half, y_h_left, hinge_side='left')
                         plans.append((title_left, dW_half, dH, dp['door_thickness'], c_p, holes_p_left, [], [], None))
                         plan_quantities[title_left] = 1
 
                         title_right = f"PORTE GAUCHE (C{cab_idx})"
-                        y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=70.0)
+                        y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
                         # Keep cups on the same panel side as the left variant; only Y distribution is mirrored.
                         holes_p_right = _build_door_face_holes(dW_half, y_h_right, hinge_side='left')
                         plans.append((title_right, dW_half, dH, dp['door_thickness'], c_p, holes_p_right, [], [], None))
@@ -1580,8 +1587,9 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                     plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 1/2", div_w, div_h, div_th, c_div_12, divider_element_holes_left[div_idx], div_tranche_holes, [], None))
                     plans.append((f"Montant Secondaire {div_idx+1} (C{cab_idx}) - 2/2", div_w, div_h, div_th, c_div_22, divider_element_holes_right[div_idx], div_tranche_holes, [], None))
 
+            dxf_expected_count += len(plans)
             for item in plans:
-                if len(item) == 10: 
+                if len(item) == 10:
                     title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut, has_rebate = item
                 elif len(item) == 9: 
                     title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut = item
@@ -1594,6 +1602,7 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
                 proj_for_plan = proj.copy()
                 if title in plan_quantities:
                     proj_for_plan['quantity'] = plan_quantities[title]
+                dxf_expected_titles.append(f"C{cab_idx} · {title}")
                 fig = _add_plan(title, Lp, Wp, Tp, ch, fh, t_long_h, t_cote_h, cut, has_rebate, proj_for_plan)
                 if output_format == 'dxf':
                     continue
@@ -1640,24 +1649,24 @@ def generate_stacked_html_plans(cabinets_to_process, indices_to_process, output_
         
         # === VALIDATION STRICTE POUR DXF ===
         if output_format == 'dxf':
-            # Vérifier que le nombre de layouts DXF = nombre d'éléments dans plans
-            expected_count = len(plans)
+            # Nombre de pièces attendues sur TOUTE la scène (cumul de tous les
+            # caissons) face au nombre de layouts réellement tracés.
+            expected_count = dxf_expected_count
             actual_count = dxf_plan_index
-            
+
             if expected_count != actual_count:
+                ecart = expected_count - actual_count
+                verdict = (f"{ecart} pièce(s) non tracée(s)" if ecart > 0
+                           else f"{-ecart} layout(s) tracé(s) en trop")
                 error_msg = (
                     f"[DXF EXPORT ERROR] VALIDATION FAILED:\n"
-                    f"Expected {expected_count} layouts in DXF (from plans list)\n"
-                    f"Got {actual_count} layouts actually drawn\n"
-                    f"{expected_count - actual_count} elements were SKIPPED!\n"
-                    f"\nPlans list contents:\n"
+                    f"{expected_count} pièce(s) attendue(s) sur l'ensemble de la scène\n"
+                    f"{actual_count} layout(s) réellement tracé(s)\n"
+                    f"{verdict}\n"
+                    f"\nPièces attendues :\n"
                 )
-                for i, item in enumerate(plans, 1):
-                    try:
-                        title = item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item)
-                        error_msg += f"  {i}. {title}\n"
-                    except:
-                        error_msg += f"  {i}. [Error parsing item]\n"
+                for i, t in enumerate(dxf_expected_titles, 1):
+                    error_msg += f"  {i}. {t}\n"
                 
                 import sys
                 print(error_msg, file=sys.stderr)
@@ -1824,23 +1833,66 @@ def _generate_all_plans_list(cabinets_to_process, indices_to_process):
     return all_plans
 
 
-def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
+def get_all_machining_plans_figures(cabinets_to_process, indices_to_process,
+                                    include_hole_counts=False):
     """
     Génère toutes les figures Plotly des feuilles d'usinage pour affichage dans Streamlit.
-    
+
+    Args:
+        include_hole_counts: si vrai, renvoie EN PLUS le décompte des perçages,
+            une ligne par feuille : {'scene': titre, 'vis': n, 'tourillon': n}.
+
     Returns:
-        Liste de tuples (titre, figure_plotly)
+        Liste de tuples (titre, figure_plotly),
+        ou (liste, décomptes) quand `include_hole_counts` est vrai.
     """
     import streamlit as st
-    from drawing_interface import draw_machining_view_pro_final
+    from drawing_interface import draw_machining_view_pro_final as _draw_sheet
     from machining_logic import (
         calculate_hole_positions, get_vertical_divider_tranche_holes,
         get_traverse_face_holes_for_divider, calculate_back_panel_holes, calculate_all_zones_2d,
         calculate_zones_from_dividers
     )
-    
+
     all_figures = []
-    
+    hole_rows = []
+
+    def draw_machining_view_pro_final(panel_name, *args, **kwargs):
+        """Compte les perçages de la feuille au passage, puis délègue au vrai
+        traceur.
+
+        Le décompte est pris sur les listes de trous RÉELLEMENT passées au
+        dessin — pas recalculé à côté. Il ne peut donc pas diverger du plan,
+        y compris pour les pièces ajoutées plus tard (charnières, tiroirs,
+        montants secondaires). La quantité de la pièce est appliquée : cinq
+        étagères identiques comptent cinq fois leur visserie."""
+        def _holes(pos, name):
+            if name in kwargs:
+                return kwargs[name] or ()
+            return args[pos] if len(args) > pos and args[pos] else ()
+
+        holes = []
+        for pos, name in ((6, "face_holes_list"),
+                          (7, "tranche_longue_holes_list"),
+                          (8, "tranche_cote_holes_list")):
+            holes.extend(_holes(pos, name))
+
+        proj_info = kwargs.get("project_info")
+        if proj_info is None and len(args) > 4:
+            proj_info = args[4]
+        try:
+            qty = max(1, int((proj_info or {}).get("quantity", 1) or 1))
+        except Exception:
+            qty = 1
+
+        n_vis = sum(1 for h in holes if isinstance(h, dict) and h.get("type") == "vis")
+        n_tour = sum(1 for h in holes if isinstance(h, dict) and h.get("type") == "tourillon")
+        hole_rows.append({"scene": panel_name,
+                          "vis": n_vis * qty,
+                          "tourillon": n_tour * qty})
+        return _draw_sheet(panel_name, *args, **kwargs)
+
+
     for i, cab in enumerate(cabinets_to_process):
         cab_idx = indices_to_process[i]
         dims = cab['dims']
@@ -1855,9 +1907,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
         h_side = H_raw
         L_trav = L_raw - 2 * t_lr
         W_mont = W_raw
-        # Fond en applique: panneau arrière à dimensions extérieures du caisson.
-        W_back = L_raw
-        H_back = H_raw
+        W_back = L_raw - 2.0
+        H_back = H_raw - 2.0
         
         ys_vis, ys_dowel = calculate_hole_positions(W_raw)
         holes_mg, holes_md = [], []
@@ -2298,7 +2349,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                     c_fa = {"Chant Avant": True, "Chant Arrière": True, "Chant Gauche": True, "Chant Droit": True}
 
                     title_left = f"PORTE DROITE (C{cab_idx})"
-                    y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=70.0)
+                    y_h_left = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='min', extra_offset_mm=80.0)
                     holes_left = _build_door_face_holes(dW, y_h_left, hinge_side='left')
                     fig_left = draw_machining_view_pro_final(
                         title_left, dW, dH, dp.get('door_thickness', 19.0),
@@ -2307,7 +2358,7 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
                     all_figures.append((title_left, fig_left))
 
                     title_right = f"PORTE GAUCHE (C{cab_idx})"
-                    y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=70.0)
+                    y_h_right = _redistribute_hinge_y_positions_with_edge_offset(y_h, dH, edge='max', extra_offset_mm=80.0)
                     # Keep cups on the same panel side as the left variant; only Y distribution is mirrored.
                     holes_right = _build_door_face_holes(dW, y_h_right, hinge_side='left')
                     fig_right = draw_machining_view_pro_final(
@@ -2330,4 +2381,8 @@ def get_all_machining_plans_figures(cabinets_to_process, indices_to_process):
             )
             all_figures.append((f"Porte (C{cab_idx})", fig_door))
     
+    # Sans le drapeau, on renvoie la liste seule : les appelants historiques
+    # (aperçu porte double, scripts de diagnostic) attendent ce format.
+    if include_hole_counts:
+        return all_figures, hole_rows
     return all_figures

@@ -4,5 +4,35 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Secrets Streamlit (ne JAMAIS pousser sur GitHub)
 .streamlit/secrets.toml
+
+# Réglages locaux d'éditeur / d'outillage
+.DS_Store
+.vscode/
+.claude/
+
+# ── Sorties et fichiers de travail ───────────────────────────────────────────
+# Tout ceci est REGÉNÉRÉ par l'application ou n'a servi qu'à des essais.
+# Les versionner alourdissait le dépôt de ~54 Mo pour moins de 2 Mo de code.
+
+# Essais et exports DXF/DWG (45 Mo à eux seuls).
+# Attention : `dxf_export/` n'est PAS un dossier de sortie mais un vrai paquet
+# Python (13 modules, importé par streamlit_dxf_demo.py) — il reste versionné.
+essai nettoyage dxf/
+*.dxf
+*.dxf.bak
+*.dwg
+
+# Archives et sauvegardes
+*.zip
+
+# Documents produits par l'application (fiche de débit, plans, notice)
+*.xlsx
+*.pdf
 plotly_probe.html
+
+# Captures et images de travail (les logos, eux, sont versionnés)
+0078.PNG.png
+pousse doigt.png

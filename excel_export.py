@@ -30,17 +30,6 @@ def create_styled_excel(project_info_dict, df_all_parts, save_data_dict=None):
 
     df_export = df_all_parts.copy()
 
-    if df_export.empty:
-        ws = wb.create_sheet(title="Débit")
-        ws['A1'] = "FEUILLE DE DEBIT"
-        ws['A1'].font = font_title_main
-        ws['A3'] = "Aucune pièce à exporter pour le filtre matière sélectionné."
-        ws['A3'].font = font_std
-        ws['A5'] = f"Projet : {project_info_dict.get('project_name', '')}"
-        ws['A6'] = f"Date : {project_info_dict.get('date', '')}"
-        wb.save(output)
-        return output.getvalue()
-
     # Sécurité export: les plinthes doivent toujours avoir le chant avant.
     if "Référence Pièce" in df_export.columns:
         plinthe_mask = df_export["Référence Pièce"].astype(str).str.lower().str.contains("plinthe", na=False)
@@ -352,7 +341,13 @@ def create_styled_excel(project_info_dict, df_all_parts, save_data_dict=None):
     if save_data_dict:
         try:
             ws_data = wb.create_sheet(title="SaveData")
-            ws_data['A1'] = json.dumps(save_data_dict, indent=2)
+            # Excel limite une cellule texte a 32767 caracteres : on decoupe le JSON
+            # sur plusieurs lignes pour ne jamais tronquer les projets volumineux.
+            json_str = json.dumps(save_data_dict)
+            chunk_size = 30000
+            chunks = [json_str[i:i + chunk_size] for i in range(0, len(json_str), chunk_size)] or [""]
+            for row_idx, chunk in enumerate(chunks, start=1):
+                ws_data.cell(row=row_idx, column=1, value=chunk)
             ws_data.sheet_state = 'hidden'
         except: pass
 

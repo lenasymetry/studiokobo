@@ -1,0 +1,98 @@
+Informations JSON manquantes pour reconstruire les meubles a l'identique du site web
+
+1) Referentiel et unites
+- coordinates_frame (interior ou exterior)
+- unit (mm ou cm)
+- axes et origine de reference
+
+2) Epaisseurs
+- panel_thickness_mm global
+- thickness_mm par piece
+
+3) Geometrie explicite par element
+- type
+- x_left_mm
+- x_right_mm
+- y_bottom_mm
+- y_top_mm
+- thickness_mm
+- depth_mm
+
+4) Separateurs verticaux
+- x_left_mm ou x_center_mm + thickness_mm
+- y_bottom_mm
+- y_top_mm
+
+5) Etageres horizontales
+- x_left_mm
+- x_right_mm
+- z_bottom_mm (ou y_bottom_mm)
+- thickness_mm
+- depth_mm
+- shelf_type (fixe/mobile)
+
+6) Tiroirs
+- x_left_mm
+- x_right_mm
+- y_bottom_mm
+- height_mm
+- drawer_face_thickness_mm
+- drawer_gap_mm
+- drawer_system
+- drawer_tech_type
+- drawer_handle_type
+- applique_mode (true/false)
+
+7) Portes
+- x_left_mm
+- x_right_mm
+- y_bottom_mm
+- height_mm
+- door_thickness_mm
+- door_gap_mm
+- door_type (single/double)
+- is_double_leaf
+- door_opening (left/right)
+- door_model (standard/floor_length)
+- fileur_width_mm
+- hinge_mode (default/custom)
+- custom_hinge_positions_mm
+
+8) Caissons secondaires (tvSide)
+- dimensions completes
+- structure complete
+- separateurs
+- etageres
+- tiroirs
+- portes
+- matieres par piece
+
+9) Etat structurel des panneaux de base
+- has_back_panel
+- has_left_upright
+- has_right_upright
+- has_bottom_traverse
+- has_top_traverse
+
+10) Matieres par piece
+- material_body
+- material_door
+- material_drawer
+- material_divider
+- material_shelf
+- material_joue
+
+11) Zones explicites
+- zone_id stable
+- zone_bounds_mm: x_min, x_max, y_min, y_max
+
+Spec minimale (resume)
+- root.unit
+- root.coordinates_frame
+- scene_cabinets[]
+  - dims: L_mm, W_mm, H_mm, t_lr_mm, t_tb_mm, t_fb_mm
+  - base_elements
+  - elements[] avec bornes explicites mm
+  - material par element
+  - metadata portes/tiroirs
+  - zones explicites (optionnel)

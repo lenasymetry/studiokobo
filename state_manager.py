@@ -29,7 +29,64 @@ def get_default_shelf_props():
     }
 
 def get_default_debit_data():
-    return []
+    """Retourne les données de débit par défaut avec les pièces de base."""
+    return [
+        {
+            "Référence Pièce": "Traverse Bas",
+            "Longueur (mm)": 0,
+            "Largeur (mm)": 0,
+            "Epaisseur": 0,
+            "Chant Avant": True,
+            "Chant Arrière": True,
+            "Chant Gauche": False,
+            "Chant Droit": False,
+            "Usinage": ""
+        },
+        {
+            "Référence Pièce": "Traverse Haut",
+            "Longueur (mm)": 0,
+            "Largeur (mm)": 0,
+            "Epaisseur": 0,
+            "Chant Avant": True,
+            "Chant Arrière": True,
+            "Chant Gauche": False,
+            "Chant Droit": False,
+            "Usinage": ""
+        },
+        {
+            "Référence Pièce": "Montant Gauche",
+            "Longueur (mm)": 0,
+            "Largeur (mm)": 0,
+            "Epaisseur": 0,
+            "Chant Avant": True,
+            "Chant Arrière": True,
+            "Chant Gauche": True,
+            "Chant Droit": True,
+            "Usinage": ""
+        },
+        {
+            "Référence Pièce": "Montant Droit",
+            "Longueur (mm)": 0,
+            "Largeur (mm)": 0,
+            "Epaisseur": 0,
+            "Chant Avant": True,
+            "Chant Arrière": True,
+            "Chant Gauche": True,
+            "Chant Droit": True,
+            "Usinage": ""
+        },
+        {
+            "Référence Pièce": "Fond",
+            "Longueur (mm)": 0,
+            "Largeur (mm)": 0,
+            "Epaisseur": 0,
+            "Chant Avant": False,
+            "Chant Arrière": False,
+            "Chant Gauche": False,
+            "Chant Droit": False,
+            "Usinage": ""
+        }
+    ]
 
 def get_selected_cabinet():
     idx = st.session_state.get('selected_cabinet_index')
@@ -93,7 +150,14 @@ def load_save_state():
             workbook = openpyxl.load_workbook(uploaded_file)
             if 'SaveData' in workbook.sheetnames:
                 save_sheet = workbook['SaveData']
-                json_data_str = save_sheet['A1'].value 
+                # Le JSON peut être découpé sur plusieurs lignes (limite Excel de
+                # 32767 caractères par cellule) : on reassemble tous les morceaux.
+                chunks = []
+                for (cell,) in save_sheet.iter_rows(min_col=1, max_col=1, values_only=False):
+                    if cell.value is None:
+                        break
+                    chunks.append(str(cell.value))
+                json_data_str = "".join(chunks)
                 if json_data_str:
                     loaded_data = json.loads(json_data_str)
                     st.session_state['project_name'] = loaded_data.get('project_name', 'Nouveau Projet')

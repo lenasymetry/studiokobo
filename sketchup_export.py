@@ -388,10 +388,11 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
         for j, s in enumerate(cabinet.get("shelves", [])):
             sh_z      = oz + tt + float(s["height"])
             sh_th     = float(s.get("thickness", 19.0))
-            # Règle demandée: étagère = traverse du caisson (mêmes dimensions X/Y).
+            # Règle demandée: étagère = longueur de la traverse, profondeur de la
+            # traverse - 19mm (pour ne pas transpercer le Fond).
             sh_w = L - 2 * tl
             sh_x = ox + tl
-            sh_depth = W
+            sh_depth = max(0.0, W - 19.0)
 
             add_panel(cab_node,
                       f"Étagère {j+1} – {cab_label}",
@@ -531,9 +532,15 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
             bot_z    = oz + float(drp.get("drawer_bottom_offset", 0.0))
             d_y      = oy - face_th   # en façade, avant le caisson
 
+            is_applique = bool(drp.get("_applique_mode", False))
+
             if bool(drp.get("_use_explicit_x_bounds")) and drp.get("x_left_mm") is not None and drp.get("x_right_mm") is not None:
                 d_x = ox + float(drp.get("x_left_mm", 0.0))
                 d_w = max(0.0, float(drp.get("x_right_mm", 0.0)) - float(drp.get("x_left_mm", 0.0)))
+            elif is_applique:
+                # Mode EN APPLIQUE : la façade recouvre toute la largeur du caisson (- 4 mm de jeu)
+                d_w = max(0.0, L - 4.0)
+                d_x = ox + 2.0
             else:
                 # Largeur : utiliser la largeur intérieure par défaut
                 d_w = L - 2 * tl - 2 * gap

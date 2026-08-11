@@ -1,0 +1,12 @@
+# Thème de l'application.
+#
+# Sans ce fichier, Streamlit applique son thème par défaut, dont la couleur
+# d'accentuation est un rouge/rose (#FF4B4B). C'est elle qui colorait les
+# boutons principaux (« Valider la position », « Générer les livrables »,
+# « Supprimer le Caisson »…), le soulignement de l'onglet actif, les cases et
+# boutons radio cochés, ainsi que les liens.
+#
+# On la remplace par l'orange KOBO. Les autres couleurs restent celles du
+# thème clair par défaut, pour ne rien changer d'autre à l'apparence.
+[theme]
+primaryColor = "#F04525"
