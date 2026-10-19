@@ -273,8 +273,7 @@ def _infer_panel_thickness_mm(payload: dict, meuble: dict, default_mm=18.0):
     _add_from_elements(payload.get('elements', []) or [], _to_float(meuble.get('L', 0.0), 0.0))
     tv_side = payload.get('tvSide', {}) if isinstance(payload.get('tvSide', {}), dict) else {}
     for side_key in ('left', 'right', 'top'):
-        side = tv_side.get(side_key)
-        if isinstance(side, dict):
+        for side in _iter_tv_side_payloads(tv_side, side_key):
             _add_from_elements(side.get('elements', []) or [], _to_float(side.get('W_cm', 0.0), 0.0))
 
     if candidates:
@@ -320,7 +319,7 @@ def _build_web_render_geometry(payload: dict, meuble: dict, t_mm: float):
     for el in payload.get('elements', []) or []:
         etype = _norm_type(el.get('type', ''))
         key_geom = _parse_element_key_geometry(el.get('key'))
-        if etype in {'separator', 'separateur'}:
+        if etype in WEB_SEPARATOR_TYPES:
             x_mm = _cm_key_to_mm(el, ['x_cm'], 0.0)
             z_mm = _cm_key_to_mm(el, ['y_cm'], t_mm)
             _add_box_spec(
@@ -396,115 +395,42 @@ def _build_web_render_geometry(payload: dict, meuble: dict, t_mm: float):
 def _build_side_cabinet(side_payload: dict, *, side_name: str, attachment_dir: str,
                         parent_index: int, depth_mm: float, panel_t_mm: float,
                         material_name: str):
-    dims_default = get_default_dims_19()
+    """Construit un caisson latéral (tvSide) avec le même import que le caisson
+    central: séparateurs, étagères (avec bornes X), portes et tiroirs."""
     L_mm = _cm_key_to_mm(side_payload, ['W_cm', 'L_cm', 'largeur_cm'], 0.0)
     H_mm = _cm_key_to_mm(side_payload, ['H_cm', 'height_cm', 'hauteur_cm'], 0.0)
     if L_mm <= 0.0 or H_mm <= 0.0:
         return None
 
-    dims = copy.deepcopy(dims_default)
-    dims['L_raw'] = L_mm
-    dims['H_raw'] = H_mm
-    dims['W_raw'] = depth_mm
-    dims['t_lr_raw'] = panel_t_mm
-    dims['t_tb_raw'] = panel_t_mm
-    dims['t_fb_raw'] = panel_t_mm
-
-    cabinet = {
-        'dims': dims,
-        'debit_data': get_default_debit_data(),
-        'name': side_name,
-        'parent_index': parent_index,
-        'attachment_dir': attachment_dir,
-        'door_props': copy.deepcopy(get_default_door_props_19()),
-        'drawer_props': get_default_drawer_props_19(),
-        'drawers': [],
-        'shelves': [],
-        'material_body': material_name,
-        'vertical_dividers': [],
-        'vertical_shelves': [],
-        'base_elements': {
-            'has_back_panel': True,
-            'has_left_upright': True,
-            'has_right_upright': True,
-            'has_bottom_traverse': True,
-            'has_top_traverse': True,
-        },
-        'joues': {
-            'gauche': get_default_joue_props(),
-            'droite': get_default_joue_props(),
-            'dessus': get_default_joue_props(),
-            'dessous': get_default_joue_props(),
-        },
+    sub_payload = {
+        'L_cm': L_mm / 10.0,
+        'H_cm': H_mm / 10.0,
+        'P_cm': depth_mm / 10.0,
+        'mat': material_name,
+        # meuble.L permet de déduire l'épaisseur depuis la largeur utile des étagères.
+        'meuble': {'L': L_mm / 10.0, 'H': H_mm / 10.0, 'P': depth_mm / 10.0},
+        'elements': side_payload.get('elements', []) or [],
     }
+    for key in ('has_door', 'battants', 'door_battants', 'door_type', 'porte_type',
+                'door_opening', 'opening', 'sens_ouverture', 'drawer_system'):
+        if key in side_payload:
+            sub_payload[key] = side_payload[key]
 
-    t_tb = float(panel_t_mm)
-    for el in side_payload.get('elements', []) or []:
-        etype = _norm_type(el.get('type', ''))
-        if etype not in {'shelf', 'shelf_simple', 'shelf_fixed', 'etagere', 'etagere_simple', 'etagere_fixe'}:
-            continue
-        y_mm = _cm_key_to_mm(el, ['y_cm', 'z_cm', 'height_cm'], -1.0)
-        if y_mm < 0.0:
-            key_geom = _parse_element_key_geometry(el.get('key'))
-            if key_geom is not None:
-                y_mm = key_geom['top_cm'] * 10.0
-        if y_mm < 0.0:
-            continue
-        cabinet['shelves'].append({
-            'height': max(0.0, min(H_mm - 2.0 * t_tb, y_mm - t_tb)),
-            'thickness': panel_t_mm,
-            'shelf_type': 'fixe',
-            'zone_id': None,
-            'material': material_name,
-        })
-
-    for shelf in cabinet['shelves']:
-        stored_x_start = shelf.get('stored_shelf_x_start_mm')
-        stored_width = shelf.get('stored_shelf_width_mm')
-        shelf_bottom = float(shelf.get('height', 0.0)) + t_tb
-        shelf_top = shelf_bottom + float(shelf.get('thickness', 19.0))
-        if stored_x_start is None or stored_width is None or not zones_for_import:
-            shelf['zone_id'] = None
-            continue
-
-        shelf_x_left = float(stored_x_start)
-        shelf_x_right = shelf_x_left + float(stored_width)
-        chosen_zone = None
-        best_score = 0.0
-        for zone in zones_for_import:
-            zx_min = float(zone['x_min'])
-            zx_max = float(zone['x_max'])
-            x_match = abs(zx_min - shelf_x_left) <= tol_mm and abs(zx_max - shelf_x_right) <= tol_mm
-            if x_match:
-                chosen_zone = zone
-                break
-            overlap_x = max(0.0, min(shelf_x_right, zx_max) - max(shelf_x_left, zx_min))
-            if overlap_x <= 0.0:
-                continue
-            score = overlap_x
-            if score > best_score + 1e-6:
-                best_score = score
-                chosen_zone = zone
-        if chosen_zone is not None:
-            zone_x_min = float(chosen_zone['x_min'])
-            zone_x_max = float(chosen_zone['x_max'])
-            shelf['zone_id'] = chosen_zone['id']
-            shelf['stored_zone_coords'] = {
-                'x_min': chosen_zone['x_min'],
-                'x_max': chosen_zone['x_max'],
-                'y_min': chosen_zone['y_min'],
-                'y_max': chosen_zone['y_max'],
-            }
-            shelf['stored_shelf_x_start_mm'] = max(shelf_x_left, zone_x_min)
-            shelf['stored_shelf_width_mm'] = max(0.0, min(shelf_x_right, zone_x_max) - shelf['stored_shelf_x_start_mm'])
-            if shelf['stored_shelf_width_mm'] <= 0.0:
-                shelf['stored_shelf_x_start_mm'] = zone_x_min
-                shelf['stored_shelf_width_mm'] = max(0.0, zone_x_max - zone_x_min)
-        else:
-            shelf['zone_id'] = None
-
-    cabinet['shelves'] = sorted(cabinet['shelves'], key=lambda s: float(s.get('height', 0.0)))
+    cabinet = _build_cabinet_from_web_config(sub_payload)
+    cabinet['name'] = side_name
+    cabinet['parent_index'] = parent_index
+    cabinet['attachment_dir'] = attachment_dir
     return cabinet
+
+
+def _iter_tv_side_payloads(tv_side: dict, side_key: str):
+    """tvSide.<côté> peut être un objet ou une liste de modules."""
+    side = tv_side.get(side_key)
+    if isinstance(side, dict):
+        return [side]
+    if isinstance(side, list):
+        return [s for s in side if isinstance(s, dict)]
+    return []
 
 
 def _build_scene_from_web_config(payload: dict):
@@ -527,22 +453,111 @@ def _build_scene_from_web_config(payload: dict):
         ('right', 'Caisson 2 (AS Droite)', 'right'),
         ('top', 'Caisson 3 (AS Haut)', 'up'),
     ):
-        side_payload = tv_side.get(side_key)
-        if not isinstance(side_payload, dict):
-            continue
-        side_cabinet = _build_side_cabinet(
-            side_payload,
-            side_name=side_name,
-            attachment_dir=attachment_dir,
-            parent_index=0,
-            depth_mm=depth_mm,
-            panel_t_mm=panel_t_mm,
-            material_name=material_name,
-        )
-        if side_cabinet is not None:
-            scene.append(side_cabinet)
+        parent_index = 0
+        side_payloads = _iter_tv_side_payloads(tv_side, side_key)
+        for module_idx, side_payload in enumerate(side_payloads):
+            module_name = side_name if len(side_payloads) == 1 else f"{side_name} {module_idx + 1}"
+            side_cabinet = _build_side_cabinet(
+                side_payload,
+                side_name=module_name,
+                attachment_dir=attachment_dir,
+                parent_index=parent_index,
+                depth_mm=depth_mm,
+                panel_t_mm=panel_t_mm,
+                material_name=material_name,
+            )
+            if side_cabinet is not None:
+                scene.append(side_cabinet)
+                # Modules suivants accolés au précédent, dans la même direction.
+                parent_index = len(scene) - 1
 
     return scene
+
+
+WEB_SEPARATOR_TYPES = {
+    'separator', 'separateur', 'separator_simple', 'separateur_simple',
+    'separator_fixed', 'separateur_fixe', 'montant', 'montant_secondaire',
+}
+
+
+def _merge_imported_shelf_pieces(cabinet: dict, panel_t_mm: float):
+    """Recolle les morceaux d'étagère importés à une même hauteur.
+
+    Le configurateur web découpe chaque étagère à chaque X de séparateur, même
+    là où le séparateur n'existe pas à cette hauteur. Une étagère n'est coupée
+    que par un montant qui la traverse réellement; un montant partiel posé
+    dessus ou dessous la laisse d'un seul tenant.
+    """
+    dims = cabinet['dims']
+    t_lr = float(dims.get('t_lr_raw', 19.0))
+    L_raw = float(dims.get('L_raw', 0.0))
+    gap_tol = max(2.0, panel_t_mm + 2.0)
+
+    def _x_bounds(shelf):
+        if shelf.get('_web_x_bounds'):
+            return float(shelf['_web_x_bounds'][0]), float(shelf['_web_x_bounds'][1])
+        x0 = shelf.get('stored_shelf_x_start_mm')
+        w = shelf.get('stored_shelf_width_mm')
+        if x0 is None or w is None or float(w) <= 0.0:
+            return t_lr, L_raw - t_lr
+        return float(x0), float(x0) + float(w)
+
+    groups = []
+    for shelf in sorted(cabinet['shelves'], key=lambda s: float(s.get('height', 0.0))):
+        h = float(shelf.get('height', 0.0))
+        if groups and abs(groups[-1][0] - h) <= 0.5:
+            groups[-1][1].append(shelf)
+        else:
+            groups.append((h, [shelf]))
+
+    merged_shelves = []
+    for _, pieces in groups:
+        # 1) Runs continus (trous <= épaisseur d'un montant = artefacts de découpe).
+        runs = []
+        for shelf in sorted(pieces, key=lambda s: _x_bounds(s)[0]):
+            x0, x1 = _x_bounds(shelf)
+            if runs and x0 <= runs[-1][2] + gap_tol:
+                runs[-1][2] = max(runs[-1][2], x1)
+            else:
+                runs.append([shelf, x0, x1])
+
+        for base, run_x0, run_x1 in runs:
+            s_bottom = float(base.get('height', 0.0))
+            s_top = s_bottom + float(base.get('thickness', 19.0))
+            # 2) Coupes aux seuls montants qui traversent cette étagère.
+            cuts = []
+            for div in cabinet.get('vertical_dividers', []):
+                d_bottom = 0.0 if div.get('_force_full_height') else float(div.get('bottom_y', 0.0))
+                d_top = float('inf') if div.get('_force_full_height') else float(div.get('top_y', float('inf')))
+                if not (d_bottom < s_top - 0.5 and d_top > s_bottom + 0.5):
+                    continue
+                c = float(div.get('position_x', 0.0))
+                half = float(div.get('thickness', panel_t_mm)) / 2.0
+                # Étagère qui bute contre le montant: s'arrêter à sa face.
+                if c - half - gap_tol <= run_x0 < c + half:
+                    run_x0 = c + half
+                if c - half < run_x1 <= c + half + gap_tol:
+                    run_x1 = c - half
+                if run_x0 < c < run_x1:
+                    cuts.append((c - half, c + half))
+            segments = []
+            cursor = run_x0
+            for d0, d1 in sorted(cuts):
+                segments.append((cursor, d0))
+                cursor = max(cursor, d1)
+            segments.append((cursor, run_x1))
+
+            for x0, x1 in segments:
+                if x1 - x0 < 1.0:
+                    continue
+                shelf = copy.deepcopy(base)
+                shelf['zone_id'] = None
+                shelf.pop('stored_zone_coords', None)
+                shelf.pop('_web_x_bounds', None)
+                shelf['stored_shelf_x_start_mm'] = x0
+                shelf['stored_shelf_width_mm'] = x1 - x0
+                merged_shelves.append(shelf)
+    return merged_shelves
 
 
 def _build_cabinet_from_web_config(payload: dict):
@@ -634,6 +649,13 @@ def _build_cabinet_from_web_config(payload: dict):
         right = max(left, min(L_mm, right))
         return left, right
 
+    def _normalize_web_separator_center_x(x_mm: float):
+        x_center = float(x_mm)
+        if 0.0 <= x_center <= interior_x_max_mm + 2.0:
+            x_center += t_lr
+        half = inferred_t_mm / 2.0
+        return max(t_lr + half, min(L_mm - t_lr - half, x_center))
+
     def _normalize_web_separator_left_x(x_left_mm: float):
         x_left = float(x_left_mm)
         if 0.0 <= x_left <= interior_x_max_mm + 2.0:
@@ -707,17 +729,46 @@ def _build_cabinet_from_web_config(payload: dict):
         drawer_system_default = 'TANDEMBOX'
         drawer_tech_default = 'K'
 
+    # Séparateurs décrits avec leurs bornes exactes par le configurateur
+    # (technical_spec.separators). Prioritaires sur l'estimation depuis y_cm.
+    tech_spec = payload.get('technical_spec') if isinstance(payload.get('technical_spec'), dict) else {}
+    tech_separators_raw = tech_spec.get('separators') if isinstance(tech_spec.get('separators'), list) else None
+    tech_separators = []
+    for ts_sep in tech_separators_raw or []:
+        if not isinstance(ts_sep, dict):
+            continue
+        cx = ts_sep.get('x_center_mm')
+        if cx is None and ts_sep.get('x_left_mm') is not None and ts_sep.get('x_right_mm') is not None:
+            cx = (_to_float(ts_sep.get('x_left_mm')) + _to_float(ts_sep.get('x_right_mm'))) / 2.0
+        if cx is None or ts_sep.get('y_bottom_mm') is None or ts_sep.get('y_top_mm') is None:
+            continue
+        tech_separators.append({
+            'x_center': _to_float(cx),
+            'y_bottom': _to_float(ts_sep.get('y_bottom_mm')),
+            'y_top': _to_float(ts_sep.get('y_top_mm')),
+            'doubled': _to_bool(ts_sep.get('doubled', False), False),
+        })
+    # Les anciens exports ne connaissent pas les doubles montants.
+    tech_has_doubled_info = any(isinstance(t, dict) and 'doubled' in t for t in tech_separators_raw or [])
+    # Le configurateur annonce un repère "interior" mais exporte en pratique
+    # des Y extérieurs (traverse basse incluse): on le détecte sur les valeurs.
+    tech_y_offset = 0.0
+    if tech_separators and max(t['y_top'] for t in tech_separators) > max(0.0, H_mm - 2.0 * t_tb) + 1.0:
+        tech_y_offset = t_tb
+    for t in tech_separators:
+        t['y_bottom'] -= tech_y_offset
+        t['y_top'] -= tech_y_offset
+
     pending_drawers = []
     pending_doors = []
     for el in elements:
         etype = _norm_type(el.get('type', ''))
         key_geom = _parse_element_key_geometry(el.get('key'))
 
-        if etype in {'separator', 'separateur'}:
+        if etype in WEB_SEPARATOR_TYPES:
             x_mm = _cm_key_to_mm(el, ['x_cm'], -1.0)
             if x_mm >= 0.0:
-                sep_left_x = _normalize_web_separator_left_x(x_mm)
-                sep_center_x = sep_left_x + inferred_t_mm / 2.0
+                sep_center_x = _normalize_web_separator_center_x(x_mm)
                 existing_divider = None
                 for div in cabinet['vertical_dividers']:
                     if abs(float(div.get('position_x', 0.0)) - sep_center_x) <= 1.0:
@@ -747,7 +798,24 @@ def _build_cabinet_from_web_config(payload: dict):
                     or ('z_top_cm' in el and el.get('z_top_cm') is not None)
                     or ('h_cm' in el and el.get('h_cm') is not None)
                 )
+                has_center_y = 'y_cm' in el and el.get('y_cm') is not None
                 if not has_full_height_flag and not has_explicit_vertical_bounds:
+                    if has_center_y:
+                        # Format configurateur web: y_cm = milieu vertical du montant.
+                        # Les bornes réelles (étagère dessous / dessus) sont résolues
+                        # après lecture de toutes les étagères. Pas de fusion ici :
+                        # deux montants au même X peuvent être de part et d'autre d'une étagère.
+                        cabinet['vertical_dividers'].append({
+                            'position_x': sep_center_x,
+                            'thickness': inferred_t_mm,
+                            'material': mat_name,
+                            'bottom_y': 0.0,
+                            'top_y': interior_h_mm,
+                            '_force_full_height': False,
+                            '_imported_separator': True,
+                            '_web_center_y': max(0.0, min(interior_h_mm, _to_float(el.get('y_cm'), 0.0) * 10.0)),
+                        })
+                        continue
                     force_full_height = True
 
                 # Priorité 1: géométrie explicite via key (y0_x0_y1_x1) si présente.
@@ -835,10 +903,12 @@ def _build_cabinet_from_web_config(payload: dict):
             shelf_width_mm = max(0.0, shelf_x_end_mm - shelf_x_start_mm)
             # Le modele interne attend une position depuis le dessus de
             # traverse basse, puis bornee a l'interieur utile.
-            shelf_height = max(0.0, min(H_mm - 2.0 * t_tb, y_mm - t_tb))
+            # y_cm = dessous de l'étagère, repère intérieur (dessus traverse basse),
+            # cf. technical_spec.shelves (y_bottom_mm = y_cm*10 + traverse).
+            shelf_height = max(0.0, min(H_mm - 2.0 * t_tb - inferred_t_mm, y_mm))
             shelf_data = {
                 'height': shelf_height,
-                'thickness': 19.0,
+                'thickness': inferred_t_mm,
                 'shelf_type': 'fixe',
                 'zone_id': None,
                 'material': mat_name,
@@ -846,6 +916,8 @@ def _build_cabinet_from_web_config(payload: dict):
             if shelf_width_mm > 0.0:
                 shelf_data['stored_shelf_x_start_mm'] = shelf_x_start_mm
                 shelf_data['stored_shelf_width_mm'] = shelf_width_mm
+                # Bornes JSON d'origine (avant rognage par les zones), cf. _merge_imported_shelf_pieces.
+                shelf_data['_web_x_bounds'] = (shelf_x_start_mm, shelf_x_end_mm)
             cabinet['shelves'].append(shelf_data)
             continue
 
@@ -951,12 +1023,100 @@ def _build_cabinet_from_web_config(payload: dict):
             })
             continue
 
+    interior_h_mm = max(0.0, H_mm - 2.0 * t_tb)
+
+    # Résolution de la hauteur des montants exprimés par leur milieu (y_cm):
+    # le configurateur calcule y_cm = (bas + haut) / 2, où bas/haut sont la
+    # traverse ou une étagère touchant le montant. On retient la paire de
+    # bornes dont le milieu correspond à y_cm (à défaut: étagères les plus proches).
+    pending_web_centers = [
+        (float(d.get('position_x', 0.0)), float(d['_web_center_y']))
+        for d in cabinet['vertical_dividers'] if '_web_center_y' in d
+    ]
+    tech_x_tol = max(2.0, inferred_t_mm / 2.0)
+    for divider in cabinet['vertical_dividers']:
+        if '_web_center_y' not in divider:
+            continue
+        center_y = float(divider.pop('_web_center_y'))
+        div_center = float(divider.get('position_x', 0.0))
+
+        tech_match = None
+        for t in tech_separators:
+            if abs(t['x_center'] - div_center) > tech_x_tol:
+                continue
+            if not (t['y_bottom'] - 1.0 <= center_y <= t['y_top'] + 1.0):
+                continue
+            # Plage ambiguë (anciens exports: tout en pleine hauteur) si elle
+            # contient le milieu de plusieurs séparateurs au même X.
+            n_inside = sum(
+                1 for px, py in pending_web_centers
+                if abs(px - div_center) <= 1.0 and t['y_bottom'] - 1.0 <= py <= t['y_top'] + 1.0
+            )
+            if n_inside > 1:
+                continue
+            tech_match = t
+            break
+        if tech_match is not None:
+            t = tech_match
+            bottom_y = max(0.0, min(interior_h_mm, t['y_bottom']))
+            top_y = max(bottom_y, min(interior_h_mm, t['y_top']))
+            divider['bottom_y'] = bottom_y
+            divider['top_y'] = top_y
+            divider['_force_full_height'] = (bottom_y <= 0.5 and top_y >= interior_h_mm - 0.5)
+            if any(o['doubled'] and abs(o['x_center'] - t['x_center']) <= 1.0
+                   and o['y_bottom'] < t['y_top'] and o['y_top'] > t['y_bottom'] for o in tech_separators):
+                divider['_web_doubled'] = True
+            continue
+
+        div_half = max(1.0, float(divider.get('thickness', inferred_t_mm))) / 2.0
+        adj_tol = max(2.0, inferred_t_mm)
+        # (y web, bas interne si borne basse, haut interne si borne haute)
+        bounds = [(0.0, 0.0, None), (interior_h_mm, None, interior_h_mm)]
+        for shelf in cabinet['shelves']:
+            s_start = float(shelf.get('stored_shelf_x_start_mm', t_lr))
+            s_end = s_start + float(shelf.get('stored_shelf_width_mm', L_mm - 2.0 * t_lr))
+            if s_start > div_center + div_half + adj_tol or s_end < div_center - div_half - adj_tol:
+                continue
+            s_bottom = float(shelf.get('height', 0.0))
+            s_top = s_bottom + float(shelf.get('thickness', 19.0))
+            # y web d'une étagère = son dessous (height).
+            bounds.append((s_bottom, s_top, s_bottom))
+
+        best = None
+        for b_web, b_int, _ in bounds:
+            if b_int is None or b_web >= center_y:
+                continue
+            for t_web, _, t_int in bounds:
+                if t_int is None or t_web <= center_y:
+                    continue
+                score = (abs((b_web + t_web) / 2.0 - center_y), t_web - b_web)
+                if best is None or score < best[0]:
+                    best = (score, b_int, t_int)
+
+        if best is not None and best[0][0] <= 5.0:
+            bottom_y, top_y = best[1], best[2]
+        else:
+            below = [b_int for b_web, b_int, _ in bounds if b_int is not None and b_web < center_y]
+            above = [t_int for t_web, _, t_int in bounds if t_int is not None and t_web > center_y]
+            bottom_y = max(below) if below else 0.0
+            top_y = min(above) if above else interior_h_mm
+        bottom_y = max(0.0, min(interior_h_mm, bottom_y))
+        top_y = max(bottom_y, min(interior_h_mm, top_y))
+        divider['bottom_y'] = bottom_y
+        divider['top_y'] = top_y
+        divider['_force_full_height'] = (bottom_y <= 0.5 and top_y >= interior_h_mm - 0.5)
+
     # Filet de sécurité import web:
     # si des séparateurs sont absents/incomplets, reconstruire les montants
     # à partir des bornes X des éléments (key, x_left_cm, x_right_cm).
-    interior_h_mm = max(0.0, H_mm - 2.0 * t_tb)
+    # Les bornes X des portes / tiroirs / étagères ne sont pas des montants:
+    # si le JSON décrit ses séparateurs, on ne devine rien.
+    json_describes_separators = (
+        tech_separators_raw is not None
+        or any(_norm_type(el.get('type', '')) in WEB_SEPARATOR_TYPES for el in elements)
+    )
     boundary_candidates_left_x = []
-    for el in elements:
+    for el in ([] if json_describes_separators else elements):
         key_geom = _parse_element_key_geometry(el.get('key'))
         x_values_mm = []
         if key_geom is not None:
@@ -1010,20 +1170,25 @@ def _build_cabinet_from_web_config(payload: dict):
                 '_inferred_from_bounds': True,
             })
         else:
-            # Si déjà présent, garantir qu'il reste visible sur toute la hauteur
-            # dans les JSON web legacy où seules les limites X sont fiables.
-            existing_divider['bottom_y'] = 0.0
-            existing_divider['top_y'] = interior_h_mm
-            existing_divider['_force_full_height'] = True
+            # Déjà décrit par un séparateur: conserver sa hauteur réelle
+            # (les bornes X des étagères ne disent rien de sa hauteur).
             existing_divider['_imported_separator'] = True
 
     divider_match_tol_mm = max(2.0, inferred_t_mm * 0.5)
 
     def _should_expand_divider_to_double(divider: dict) -> bool:
+        if divider.pop('_web_doubled', False):
+            return True
+        if tech_has_doubled_info:
+            # Le configurateur indique lui-même les doubles montants (doubled).
+            return False
         div_center = float(divider.get('position_x', 0.0))
         div_thickness = max(1.0, float(divider.get('thickness', inferred_t_mm)))
         div_left = div_center - div_thickness / 2.0
         div_right = div_center + div_thickness / 2.0
+
+        div_bottom = float(divider.get('bottom_y', 0.0))
+        div_top = float(divider.get('top_y', interior_h_mm))
 
         left_drawers = []
         right_drawers = []
@@ -1032,6 +1197,9 @@ def _build_cabinet_from_web_config(payload: dict):
             x_right = float(pending.get('x_right_mm', 0.0))
             y_bottom = float(pending.get('y_bottom_mm', 0.0))
             y_top = y_bottom + float(pending.get('height_mm', 0.0))
+            # Ignorer les tiroirs hors de la hauteur du montant (repère intérieur).
+            if min(y_top - t_tb, div_top) - max(y_bottom - t_tb, div_bottom) <= divider_match_tol_mm:
+                continue
             if x_left < div_center and abs(x_right - div_center) <= div_thickness + divider_match_tol_mm:
                 left_drawers.append((y_bottom, y_top))
             if x_right > div_center and abs(x_left - div_center) <= div_thickness + divider_match_tol_mm:
@@ -1066,7 +1234,15 @@ def _build_cabinet_from_web_config(payload: dict):
         divider_x = float(divider.get('position_x', 0.0))
         existing_divider = None
         for kept in deduped_dividers:
-            if abs(float(kept.get('position_x', 0.0)) - divider_x) <= final_divider_tol_mm:
+            if abs(float(kept.get('position_x', 0.0)) - divider_x) > final_divider_tol_mm:
+                continue
+            # Même X mais segments disjoints (ex: dessous / dessus d'une étagère):
+            # ce sont deux montants distincts, ne pas les fusionner.
+            overlap_y = (
+                min(float(kept.get('top_y', interior_h_mm)), float(divider.get('top_y', interior_h_mm)))
+                - max(float(kept.get('bottom_y', 0.0)), float(divider.get('bottom_y', 0.0)))
+            )
+            if overlap_y > 0.5:
                 existing_divider = kept
                 break
 
@@ -1318,6 +1494,7 @@ def _build_cabinet_from_web_config(payload: dict):
     if cabinet['imported_doors']:
         cabinet['door_props']['has_door'] = False
 
+    cabinet['shelves'] = _merge_imported_shelf_pieces(cabinet, inferred_t_mm)
     cabinet['shelves'] = sorted(cabinet['shelves'], key=lambda s: float(s.get('height', 0.0)))
     cabinet['drawers'] = sorted(cabinet['drawers'], key=lambda d: float(d.get('drawer_bottom_offset', 0.0)))
     cabinet['imported_doors'] = sorted(
@@ -1585,6 +1762,37 @@ def update_shelf_material(shelf_index, key):
     cabinet = get_selected_cabinet()
     if cabinet and widget_key in st.session_state:
         if 'shelves' in cabinet and shelf_index < len(cabinet['shelves']): cabinet['shelves'][shelf_index]['material'] = st.session_state[widget_key]
+
+def set_common_stacked_door(lower_index, enabled=True, select_lower=False):
+    """Pose (ou retire) la porte commune à deux caissons superposés.
+
+    Le vantail commun est toujours porté par le caisson DU BAS : c'est lui qui
+    donne l'origine, le sens d'ouverture et le modèle. L'activer implique donc
+    d'activer sa porte — sans quoi le réglage resterait sans effet.
+    """
+    scene = st.session_state.get('scene_cabinets', [])
+    if not (0 <= lower_index < len(scene)):
+        return
+    cab = scene[lower_index]
+    door_props = cab.setdefault('door_props', get_default_door_props_19())
+    door_props['span_up'] = bool(enabled)
+    if enabled:
+        door_props['has_door'] = True
+        # Porte et tiroirs ne cohabitent pas sur un même caisson (même règle
+        # que `update_selected_cabinet_door('has_door')`).
+        if 'drawer_props' in cab:
+            cab['drawer_props']['has_drawer'] = False
+    if select_lower:
+        st.session_state['selected_cabinet_index'] = lower_index
+
+
+def toggle_common_stacked_door(lower_index):
+    """Callback du commutateur « Porte commune avec le caisson du dessus »."""
+    widget_key = f"span_up_{lower_index}"
+    if widget_key not in st.session_state:
+        return
+    set_common_stacked_door(lower_index, enabled=bool(st.session_state[widget_key]))
+
 
 def add_cabinet(origin_type='central'):
     if origin_type == 'central':
