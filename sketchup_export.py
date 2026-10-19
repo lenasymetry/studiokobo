@@ -17,6 +17,9 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from typing import List, Tuple, Dict
 
+from machining_logic import (get_cabinet_door_height_raw, cabinet_door_is_hidden,
+                             get_door_vertical_geometry)
+
 
 # ---------------------------------------------------------------------------
 # Géométrie : construction d'une boîte (parallélépipède rectangle)
@@ -367,10 +370,16 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
         for j, div in enumerate(cabinet.get("vertical_dividers", [])):
             div_x  = float(div["position_x"])
             div_th = float(div.get("thickness", 19.0))
+            div_bot = 0.0
+            div_h   = H - 2*tt
+            if (not div.get("_force_full_height", False)
+                    and div.get("bottom_y") is not None and div.get("top_y") is not None):
+                div_bot = max(0.0, float(div["bottom_y"]))
+                div_h   = max(0.0, min(H - 2*tt, float(div["top_y"])) - div_bot)
             add_panel(cab_node,
                       f"Séparateur {j+1} – {cab_label}",
-                      ox + div_x - div_th / 2, oy, oz + tt,
-                      div_th, W - tb, H - 2*tt)
+                      ox + div_x - div_th / 2, oy, oz + tt + div_bot,
+                      div_th, W - tb, div_h)
 
         # ── Étagères verticales ─────────────────────────────────────────
         for j, vs in enumerate(cabinet.get("vertical_shelves", [])):
@@ -477,18 +486,21 @@ def generate_sketchup_collada(scene_cabinets: List[Dict], door_mode: str = "clos
         # ── Porte(s) natives ────────────────────────────────────────────
         else:
             dp = cabinet.get("door_props", {})
-            if not dp.get("has_door", False):
+            # Caisson recouvert par la porte commune du caisson du dessous :
+            # sa porte propre ferait double emploi avec le vantail commun.
+            if not dp.get("has_door", False) or cabinet_door_is_hidden(cabinet):
                 dp = None
         if dp is not None:
             gap      = float(dp.get("door_gap",       2.0))
             door_th  = float(dp.get("door_thickness", 19.0))
-            # Porte cache-pieds: descend de 80 mm sous le meuble.
-            if dp.get("door_model") == "floor_length":
-                d_H = H + 80.0 - gap
-                d_z = oz - 80.0
-            else:
-                d_H = H - 2 * gap
-                d_z = oz + gap
+            # Porte commune à deux caissons superposés : la hauteur couverte
+            # remplace celle du seul caisson. Le modèle cache-pieds descend
+            # devant les pieds, en s'arrêtant à 10 mm du sol.
+            d_H, door_dz = get_door_vertical_geometry(
+                get_cabinet_door_height_raw(cabinet), dp,
+                bool(cabinet.get("has_feet", False)), cabinet.get("foot_height", 0.0)
+            )
+            d_z = oz + door_dz
             # Porte positionnée en façade (y = oy − épaisseur), représentation fermée
             d_y   = oy - door_th
             is_ajar = str(door_mode).lower() == "ajar"
