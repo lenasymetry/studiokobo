@@ -25,7 +25,10 @@ from matplotlib.transforms import Bbox
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.colors import to_rgba
 from PIL import Image, ImageDraw
-from machining_logic import calculate_all_zones_2d
+from machining_logic import (calculate_all_zones_2d, get_cabinet_door_height_raw,
+                             cabinet_door_is_hidden, get_door_vertical_geometry,
+                             get_cache_pied_drop)
+from project_definitions import get_joue_dimensions
 
 # Résolution du rendu 3D matriciel (pixels par pouce de la zone de vue).
 # Un vrai z-buffer pixel par pixel : chaque pixel de la vue garde la face la
@@ -555,14 +558,16 @@ def _cabinet_vertices(cab: Dict, origin=(0.0, 0.0, 0.0)) -> Dict[str, tuple]:
     # dimensionner ces points fait aussi que le dégagement local de `dim_edge`
     # trouve la porte elle-même juste à côté (donc un petit décalage propre),
     # au lieu de la capter au loin et de partir hors de la page.
-    if dp.get("has_door"):
+    if dp.get("has_door") and not cabinet_door_is_hidden(cab):
         gap = float(dp.get("door_gap", 2.0))
-        if dp.get("door_model") == "floor_length":
-            door_h = H + 80.0 - gap
-            door_z_bot = oz - 80.0
-        else:
-            door_h = H - 2.0 * gap
-            door_z_bot = oz + gap
+        # Porte commune à deux caissons superposés : la hauteur couverte
+        # remplace celle du seul caisson. Le modèle cache-pieds descend devant
+        # les pieds, en s'arrêtant à 10 mm du sol.
+        door_h, door_dz = get_door_vertical_geometry(
+            get_cabinet_door_height_raw(cab), dp,
+            bool(cab.get("has_feet", False)), cab.get("foot_height", 0.0)
+        )
+        door_z_bot = oz + door_dz
         dtype = dp.get("door_type", "single")
 
         if dtype == "single":
@@ -672,10 +677,16 @@ def _render_cabinet(ax_img, fig, rect, cab: Dict, origin=(0.0, 0.0, 0.0),
     pad = max(L, W, H) * 0.10
     m   = pad * 1.4
     # Porte sol : peut descendre de 80 mm sous le bas du caisson
-    z_floor_ext = 90.0 if (dp.get("has_door") and dp.get("door_model") == "floor_length") else 0
+    z_floor_ext = 0.0
+    if dp.get("has_door") and dp.get("door_model") == "floor_length":
+        z_floor_ext = get_cache_pied_drop(
+            bool(cab.get("has_feet", False)), cab.get("foot_height", 0.0)
+        ) + 10.0
+    # Porte commune à deux caissons : elle dépasse en haut du caisson rendu.
+    z_top_ext = max(0.0, get_cabinet_door_height_raw(cab) - H) if dp.get("has_door") else 0.0
     xl0, xl1 = ox - m*0.2,  ox + L + m*2.0
     yl0, yl1 = oy - m*0.35, oy + W + m*0.2   # marge avant (portes/tiroirs)
-    zl0, zl1 = oz - max(m*0.1, z_floor_ext),  oz + H + m*0.7
+    zl0, zl1 = oz - max(m*0.1, z_floor_ext),  oz + H + z_top_ext + m*0.7
 
     # Porte ouverte à 90°/120° : elle pivote depuis un coin du caisson et
     # balaie un rayon jusqu'à sa propre largeur (≤ L), aussi bien en X qu'en Y
@@ -751,14 +762,20 @@ def _render_cabinet(ax_img, fig, rect, cab: Dict, origin=(0.0, 0.0, 0.0),
     for div in cab.get("vertical_dividers", []) or []:
         div_x = float(div.get("position_x", 0.0))
         div_th = float(div.get("thickness", 19.0))
+        div_bottom = 0.0
+        div_h = H - 2 * tt
+        if (not div.get("_force_full_height", False)
+                and div.get("bottom_y") is not None and div.get("top_y") is not None):
+            div_bottom = max(0.0, float(div["bottom_y"]))
+            div_h = max(0.0, min(H - 2 * tt, float(div["top_y"])) - div_bottom)
         _add_box(
             boxes,
             rox + div_x - div_th / 2.0,
             roy,
-            roz + tt,
+            roz + tt + div_bottom,
             div_th,
             W - tb,
-            H - 2 * tt,
+            div_h,
             skip=bf_skip,
         )
 
@@ -783,16 +800,18 @@ def _render_cabinet(ax_img, fig, rect, cab: Dict, origin=(0.0, 0.0, 0.0),
         )
 
     # 4) Portes
-    if dp.get("has_door"):
+    if dp.get("has_door") and not cabinet_door_is_hidden(cab):
         gap = float(dp.get("door_gap", 2.0))
         dth_d = float(dp.get("door_thickness", 19.0))
         dy = roy - dth_d
-        if dp.get("door_model") == "floor_length":
-            dH = H + 80.0 - gap
-            dz = roz - 80.0
-        else:
-            dH = H - 2.0 * gap
-            dz = roz + gap
+        # Porte commune à deux caissons superposés : la hauteur couverte
+        # remplace celle du seul caisson. Le modèle cache-pieds descend devant
+        # les pieds, en s'arrêtant à 10 mm du sol.
+        dH, door_dz = get_door_vertical_geometry(
+            get_cabinet_door_height_raw(cab), dp,
+            bool(cab.get("has_feet", False)), cab.get("foot_height", 0.0)
+        )
+        dz = roz + door_dz
         # Ouverture "droite" à 120° pour bien dégager l'intérieur du caisson
         # (demande métier) ; "gauche" à 90°. À 45° la porte côté "droite"
         # devenait exactement de profil pour cette caméra (azim=225°), donc
@@ -948,23 +967,25 @@ def _render_cabinet(ax_img, fig, rect, cab: Dict, origin=(0.0, 0.0, 0.0),
 
     # 7) Joues
     joues = cab.get("joues", {}) or {}
+    cab_has_feet = bool(cab.get("has_feet", False))
+    cab_foot_height = cab.get("foot_height", 0.0)
     for key, side in (("gauche", "left"), ("droite", "right"), ("dessus", "top"), ("dessous", "bottom")):
         joue = joues.get(key, {}) or {}
         if not bool(joue.get("enabled", False)):
             continue
-        jw = float(joue.get("width", 0.0) or 0.0)
-        jl = float(joue.get("length", 0.0) or 0.0)
-        jt = float(joue.get("thickness", 0.0) or 0.0)
+        geo = get_joue_dimensions(key, dims, cab_has_feet, cab_foot_height, fileur_w)
+        jw, jl, jt = geo["width"], geo["length"], geo["thickness"]
+        jx_offset, jz_offset = geo["x_offset"], geo["z_offset"]
         if jw <= 0.0 or jl <= 0.0 or jt <= 0.0:
             continue
         if side == "left":
-            _add_box(boxes, rox - jt, roy, roz, jt, jw, jl, alpha=0.75, skip=bf_skip)
+            _add_box(boxes, rox - jt, roy, roz + jz_offset, jt, jw, jl, alpha=0.75, skip=bf_skip)
         elif side == "right":
-            _add_box(boxes, rox + render_L, roy, roz, jt, jw, jl, alpha=0.75, skip=bf_skip)
+            _add_box(boxes, rox + render_L, roy, roz + jz_offset, jt, jw, jl, alpha=0.75, skip=bf_skip)
         elif side == "top":
-            _add_box(boxes, rox, roy, roz + H, jw, jl, jt, alpha=0.75, skip=bf_skip)
+            _add_box(boxes, rox + jx_offset, roy, roz + H, jl, jw, jt, alpha=0.75, skip=bf_skip)
         elif side == "bottom":
-            _add_box(boxes, rox, roy, roz - jt, jw, jl, jt, alpha=0.75, skip=bf_skip)
+            _add_box(boxes, rox + jx_offset, roy, roz - jt, jl, jw, jt, alpha=0.75, skip=bf_skip)
 
     # Recadrage sur la silhouette réelle : à faire ICI, une fois toutes les
     # boîtes empilées (y compris la porte ouverte, qui est ce qui faisait le
@@ -1017,7 +1038,8 @@ def _render_cabinet(ax_img, fig, rect, cab: Dict, origin=(0.0, 0.0, 0.0),
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _hinge_count_per_leaf(cab: Dict) -> int:
-    """Nombre de charnières PAR VANTAIL, d'après la hauteur totale du caisson :
+    """Nombre de charnières PAR VANTAIL, d'après la hauteur habillée par la porte
+    (les deux caissons quand la porte leur est commune) :
     2 en dessous de 1500 mm, 3 de 1500 à 2000 mm, 4 au-delà.
 
     Un réglage manuel des charnières dans l'application (mode « Personnalisé »)
@@ -1028,7 +1050,7 @@ def _hinge_count_per_leaf(cab: Dict) -> int:
         custom = dp.get("custom_hinge_positions") or []
         if custom:
             return len(custom)
-    H = float(cab.get("dims", {}).get("H_raw", 0.0))
+    H = get_cabinet_door_height_raw(cab)
     if H > 2000.0:
         return 4
     if H >= 1500.0:
@@ -1114,14 +1136,14 @@ def _description_lines(cab: Dict, label: str) -> List[str]:
         lines.append("")
 
     # Porte(s) : cotes réelles de chaque vantail.
-    if dp.get("has_door"):
+    if dp.get("has_door") and not cabinet_door_is_hidden(cab):
         dtype = dp.get("door_type", "single")
         gap = float(dp.get("door_gap", 2.0))
         dth_d = float(dp.get("door_thickness", 19.0))
-        if dp.get("door_model") == "floor_length":
-            dH = H + 80.0 - gap
-        else:
-            dH = H - 2.0 * gap
+        dH, _ = get_door_vertical_geometry(
+            get_cabinet_door_height_raw(cab), dp,
+            bool(cab.get("has_feet", False)), cab.get("foot_height", 0.0)
+        )
 
         zone_id = dp.get("zone_id", None)
         if zone_id is not None and zone_id < len(zones_all):
