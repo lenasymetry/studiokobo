@@ -43,10 +43,48 @@ from geometry_helpers import (
     add_hatched_zones_3d,
     add_zone_debug_boxes_3d,
 )
-from machining_logic import calculate_all_zones_2d, calculate_origins_recursively
+from machining_logic import (
+    calculate_all_zones_2d,
+    calculate_origins_recursively,
+    apply_door_spans,
+    get_stacked_child_index,
+    get_cabinet_door_height_raw,
+    cabinet_door_is_hidden,
+    get_door_vertical_geometry,
+    get_cache_pied_drop,
+    cabinet_rests_on_floor,
+    get_plinthe_for_cabinet,
+    format_plinthe_labels,
+)
 from utils import calculate_available_space_between_horizontal_shelves
 
+# `layout="wide"` : l'application occupe toute la largeur de l'écran par défaut,
+# au lieu d'obliger chaque utilisateur à cocher « Wide mode » dans le menu
+# Settings de Streamlit à chaque visite. Le réglage est utile ici parce que la
+# mise en page repose sur deux colonnes — édition à gauche, prévisualisation 3D
+# à droite — qui deviennent étroites dans la largeur réduite par défaut.
+#
+# Cet appel doit rester LE PREMIER appel Streamlit du script : Streamlit refuse
+# `set_page_config` dès qu'une autre commande a déjà produit un élément.
+st.set_page_config(
+    page_title="Studio KOBO",
+    layout="wide",
+)
+
 initialize_session_state()
+
+
+def _sync_door_spans():
+    """Recalcule l'état des portes communes à deux caissons superposés.
+
+    Appelée à chaque exécution du script (et de nouveau juste avant le calcul du
+    débit et de la 3D, pour prendre en compte les widgets qui écrivent
+    directement dans `door_props` pendant le rendu de la page).
+    """
+    apply_door_spans(st.session_state.get('scene_cabinets', []) or [])
+
+
+_sync_door_spans()
 
 
 def _scene_to_json(scene):
@@ -89,6 +127,16 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
     """Génère les livrables et stocke les résultats en session."""
     scene = st.session_state.get('scene_cabinets', [])
     indices = list(range(len(scene)))
+
+    # Les pieds sont une option GLOBALE du projet, mais SketchUp et les vues 3D
+    # reçoivent des caissons détachés de la session : on leur joint l'info, sans
+    # quoi une porte cache-pieds ne saurait pas de combien descendre.
+    _global_has_feet = bool(st.session_state.get('has_feet', False))
+    _global_foot_height = float(st.session_state.get('foot_height', 0.0) or 0.0)
+    scene_with_feet = [
+        {**cab, 'has_feet': _global_has_feet, 'foot_height': _global_foot_height}
+        for cab in scene
+    ]
 
     selected_materials = _normalize_materials_list(selected_materials)
     material_filter_key = _build_material_filter_key(selected_materials)
@@ -188,11 +236,11 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
             for cab in scene
             if isinstance(cab, dict)
         )
-        skp_closed_data = generate_sketchup_collada(scene, door_mode="closed")
+        skp_closed_data = generate_sketchup_collada(scene_with_feet, door_mode="closed")
         skp_closed_ok = bool(skp_closed_data)
 
         if skp_has_doors:
-            skp_open_data = generate_sketchup_collada(scene, door_mode="ajar")
+            skp_open_data = generate_sketchup_collada(scene_with_feet, door_mode="ajar")
             skp_open_ok = bool(skp_open_data)
     except Exception:
         skp_has_doors = False
@@ -204,8 +252,9 @@ def _generate_and_store_exports(all_parts, selected_materials=None):
     try:
         from views_3d_export import generate_3d_views_pdf, generate_sketchup_ruby_script
 
+        scene_for_pdf = scene_with_feet
         views3d_pdf_data = generate_3d_views_pdf(
-            scene,
+            scene_for_pdf,
             project_name=st.session_state.get("project_name", "Meuble"),
             client=st.session_state.get("client", ""),
             date_str=datetime.date.today().strftime("%d/%m/%Y"),
@@ -416,10 +465,13 @@ def _build_double_cachepied_preview_from_dxf(selected_cab, cab_number):
     dp = selected_cab.get("door_props", {})
     dims = selected_cab.get("dims", {})
     L_raw = float(dims.get("L_raw", 0.0) or 0.0)
-    H_raw = float(dims.get("H_raw", 0.0) or 0.0)
+    H_raw = get_cabinet_door_height_raw(selected_cab)
     door_gap = float(dp.get("door_gap", 2.0) or 2.0)
-    foot_h = float(st.session_state.get("foot_height", 0.0) or 0.0)
-    dH = (H_raw + foot_h - door_gap - 10.0) if dp.get("door_model") == "floor_length" else (H_raw - (2.0 * door_gap))
+    dH, _ = get_door_vertical_geometry(
+        H_raw, dp,
+        bool(st.session_state.get("has_feet", False)),
+        st.session_state.get("foot_height", 0.0),
+    )
     dW = (L_raw - (2.0 * door_gap)) / 2.0
 
     target_titles = [
@@ -913,6 +965,7 @@ def has_holes_for_piece(ref_key, cabinet, piece_data=None):
     return False
 
 def calculate_all_project_parts():
+    _sync_door_spans()
     all_parts = []
     lettre_code = 65 
     shelf_dims_cache = {} 
@@ -1015,17 +1068,24 @@ def calculate_all_project_parts():
             all_parts.append(new_piece)
 
         # Plinthe (débit uniquement) obligatoire si des pieds sont activés.
-        if cabinet_has_feet:
-            plinthe_longueur = max(0.0, L_traverse + 100.0)
+        # Une seule pièce par façade au sol : les caissons superposés n'en ont
+        # pas, et des caissons accolés se partagent une plinthe continue,
+        # rattachée au premier d'entre eux (voir `get_plinthe_groups`).
+        plinthe_group = (
+            get_plinthe_for_cabinet(st.session_state['scene_cabinets'], i)
+            if cabinet_has_feet else None
+        )
+        if plinthe_group:
+            plinthe_ref, plinthe_caissons = format_plinthe_labels(plinthe_group['indices'])
             all_parts.append({
                 "Lettre": f"C{i}-PL",
-                "Référence Pièce": f"Plinthe (C{i})",
-                "Matière": cabinet.get('material_body', 'Matière Corps'),
-                "Caisson": f"C{i}",
+                "Référence Pièce": plinthe_ref,
+                "Matière": plinthe_group['material'],
+                "Caisson": plinthe_caissons,
                 "Qté": 1,
-                "Longueur (mm)": plinthe_longueur,
-                "Largeur (mm)": 80.0,
-                "Epaisseur": 19.0,
+                "Longueur (mm)": plinthe_group['length'],
+                "Largeur (mm)": plinthe_group['width'],
+                "Epaisseur": plinthe_group['thickness'],
                 "Chant Avant": True,
                 "Chant Arrière": False,
                 "Chant Gauche": False,
@@ -1078,15 +1138,19 @@ def calculate_all_project_parts():
                 'Chant Gauche': False,
                 'Chant Droit': False,
             })
+            joue_geo = get_joue_dimensions(
+                joue_key, dims, cabinet_has_feet,
+                st.session_state.get('foot_height', 0.0), fileur_w
+            )
             all_parts.append({
                 "Lettre": f"C{i}-J{joue_key[:1].upper()}",
                 "Référence Pièce": f"{joue_label} (C{i})",
                 "Matière": str(joue.get('material', 'Matière Corps')),
                 "Caisson": f"C{i}",
                 "Qté": 1,
-                "Longueur (mm)": float(joue.get('length', 0.0) or 0.0),
-                "Largeur (mm)": float(joue.get('width', 0.0) or 0.0),
-                "Epaisseur": float(joue.get('thickness', 0.0) or 0.0),
+                "Longueur (mm)": joue_geo['length'],
+                "Largeur (mm)": joue_geo['width'],
+                "Epaisseur": joue_geo['thickness'],
                 "Chant Avant": chants['Chant Avant'],
                 "Chant Arrière": chants['Chant Arrière'],
                 "Chant Gauche": chants['Chant Gauche'],
@@ -1124,11 +1188,17 @@ def calculate_all_project_parts():
                 })
 
         # 2b. Porte native unique/double sur tout le caisson
-        elif cabinet['door_props']['has_door']:
+        # `cabinet_door_is_hidden` : caisson déjà habillé par la porte commune
+        # du caisson du dessous — sa propre porte ne doit pas être débitée.
+        elif cabinet['door_props']['has_door'] and not cabinet_door_is_hidden(cabinet):
             dp = cabinet['door_props']
-            dH = dims['H_raw'] - (2 * dp['door_gap']) 
-            if dp.get('door_model') == 'floor_length':
-                dH += 80.0
+            # Hauteur couverte : celle du caisson, ou celle des deux caissons
+            # superposés quand la porte leur est commune. Le modèle cache-pieds
+            # descend devant les pieds en s'arrêtant à 10 mm du sol.
+            dH, _ = get_door_vertical_geometry(
+                get_cabinet_door_height_raw(cabinet), dp,
+                cabinet_has_feet, st.session_state.get('foot_height', 0.0)
+            )
             
             # Vérifier si une zone est assignée
             zone_id = dp.get('zone_id', None)
@@ -1319,6 +1389,10 @@ def calculate_all_project_parts():
             for div_idx, div in enumerate(cabinet['vertical_dividers']):
                 div_th = div.get('thickness', 19.0)
                 div_h = h_side - 2 * t_tb  # Hauteur entre traverses
+                if (not div.get('_force_full_height', False)
+                        and div.get('bottom_y') is not None and div.get('top_y') is not None):
+                    # Montant partiel (ex: import web entre deux étagères)
+                    div_h = max(0.0, min(div_h, float(div['top_y'])) - max(0.0, float(div['bottom_y'])))
                 div_w = dims['W_raw']  # Largeur (profondeur)
                 
                 cav, car, cg, cd = get_automatic_edge_banding("Montant")
@@ -1373,7 +1447,7 @@ def calculate_all_project_parts():
 
 def get_cached_project_parts():
     """Calcule la feuille de debit seulement quand la scene change."""
-    PARTS_CACHE_SCHEMA_VERSION = "v4_plinthe_mandatory_with_feet"
+    PARTS_CACHE_SCHEMA_VERSION = "v6_plinthe_joined_across_cabinets"
     scene_json = _scene_to_json(st.session_state['scene_cabinets'])
     parts_context = {
         "has_feet": bool(st.session_state.get('has_feet', False)),
@@ -1889,6 +1963,75 @@ with col1:
                     
                     st.markdown("#### Porte (Façade)")
                     st.toggle("Ajouter une porte", value=d_p['has_door'], key=f"has_door_{idx}", on_change=lambda: update_selected_cabinet_door('has_door'))
+
+                    # ── Porte commune à deux caissons superposés ──────────────
+                    # Le vantail commun est porté par le caisson DU BAS, mais
+                    # l'option doit être atteignable depuis les DEUX caissons de
+                    # la pile : « ⬆️ Ajouter en haut » sélectionne le caisson du
+                    # dessus, et c'est là que l'utilisateur cherche la porte.
+                    # Elle est aussi posée AVANT le test `has_door`, parce que
+                    # l'activer allume la porte du caisson du bas.
+                    _scene = st.session_state['scene_cabinets']
+                    _stacked_idx = get_stacked_child_index(_scene, idx)
+                    _lower_idx = selected_cab.get('parent_index') if selected_cab.get('attachment_dir') == 'up' else None
+
+                    if _stacked_idx is not None:
+                        _stacked_cab = _scene[_stacked_idx]
+                        st.toggle(
+                            f"Porte commune avec le caisson du dessus — {_stacked_cab.get('name', _stacked_idx)}",
+                            value=bool(d_p.get('span_up', False)),
+                            key=f"span_up_{idx}",
+                            on_change=lambda c=idx: toggle_common_stacked_door(c),
+                            help="Un seul vantail habille les deux caissons superposés. "
+                                 "Toutes les autres règles restent celles d'une porte simple "
+                                 "(jeu, modèle cache-pieds, charnières réparties sur la hauteur totale).",
+                        )
+                        if d_p.get('span_up'):
+                            _h_total = get_cabinet_door_height_raw(selected_cab)
+                            st.caption(
+                                f"Hauteur couverte : {selected_cab['dims']['H_raw']:.0f} + "
+                                f"{_stacked_cab['dims']['H_raw']:.0f} = {_h_total:.0f} mm"
+                            )
+                            if abs(float(_stacked_cab['dims']['L_raw']) - float(selected_cab['dims']['L_raw'])) > 0.5:
+                                st.warning(
+                                    "Les deux caissons n'ont pas la même longueur "
+                                    f"({selected_cab['dims']['L_raw']:.0f} mm en bas, "
+                                    f"{_stacked_cab['dims']['L_raw']:.0f} mm en haut) : "
+                                    "la porte commune est calée sur celle du caisson du bas."
+                                )
+                            if _stacked_cab.get('door_props', {}).get('has_door'):
+                                st.info(
+                                    "La porte propre du caisson du dessus est ignorée "
+                                    "tant que la porte commune est active."
+                                )
+
+                    elif _lower_idx is not None and 0 <= _lower_idx < len(_scene):
+                        # Caisson du dessus : raccourci vers la porte commune,
+                        # qui se règle sur le caisson du bas.
+                        _lower_cab = _scene[_lower_idx]
+                        if _lower_cab.get('door_props', {}).get('span_up'):
+                            st.success(
+                                f"Ce caisson est habillé par la porte commune du caisson "
+                                f"« {_lower_cab.get('name', _lower_idx)} ». Sa porte propre est ignorée."
+                            )
+                            st.button(
+                                "⚙️ Régler la porte commune",
+                                key=f"goto_common_door_{idx}",
+                                on_click=lambda c=_lower_idx: set_common_stacked_door(c, True, select_lower=True),
+                                use_container_width=True,
+                            )
+                        else:
+                            st.caption(
+                                f"Ce caisson est posé sur « {_lower_cab.get('name', _lower_idx)} ». "
+                                "Vous pouvez habiller les deux d'un seul vantail."
+                            )
+                            st.button(
+                                "🚪 Poser une porte commune aux 2 caissons",
+                                key=f"make_common_door_{idx}",
+                                on_click=lambda c=_lower_idx: set_common_stacked_door(c, True, select_lower=True),
+                                use_container_width=True,
+                            )
+
                     if d_p['has_door']:
                         # Sélection de zone pour la porte
                         if len(all_zones_2d) > 1:
@@ -1939,7 +2082,7 @@ with col1:
                             if len(custom_positions) != num_hinges:
                                 if len(custom_positions) < num_hinges:
                                     # Ajouter des positions par défaut
-                                    door_height = selected_cab['dims']['H_raw']
+                                    door_height = get_cabinet_door_height_raw(selected_cab)
                                     for i in range(len(custom_positions), num_hinges):
                                         # Répartir équitablement
                                         pos = (i + 1) * door_height / (num_hinges + 1)
@@ -1951,12 +2094,13 @@ with col1:
                             
                             # Afficher les champs pour chaque charnière
                             for i in range(num_hinges):
-                                current_pos = custom_positions[i] if i < len(custom_positions) else (i + 1) * selected_cab['dims']['H_raw'] / (num_hinges + 1)
+                                _hinge_h_max = get_cabinet_door_height_raw(selected_cab)
+                                current_pos = custom_positions[i] if i < len(custom_positions) else (i + 1) * _hinge_h_max / (num_hinges + 1)
                                 new_pos = st.number_input(
                                     f"Position charnière {i+1} (mm depuis le bas)",
                                     value=float(current_pos),
                                     min_value=0.0,
-                                    max_value=float(selected_cab['dims']['H_raw']),
+                                    max_value=float(_hinge_h_max),
                                     step=1.0,
                                     format="%.0f",
                                     key=f"hinge_pos_{idx}_{i}",
@@ -2467,6 +2611,12 @@ with col1:
 
                 with t_joues:
                     st.markdown("#### Joues")
+                    st.caption(
+                        "Les cotes des joues sont automatiques : chaque joue recouvre "
+                        "exactement le montant ou la traverse qui lui est associé. "
+                        "Sur pieds, les joues gauche et droite descendent jusqu'au sol "
+                        "pour cacher les pieds, comme une porte cache-pieds."
+                    )
                     # Migration douce: anciennes versions stockaient les joues dans door_props.
                     legacy_joues = d_p.get('joues') if isinstance(d_p, dict) else None
                     if 'joues' not in selected_cab and isinstance(legacy_joues, dict):
@@ -2493,41 +2643,34 @@ with col1:
                             key=f"joue_enabled_{joue_key}_{idx}"
                         )
                         joue['enabled'] = enabled
+                        # Les cotes ne sont plus saisies : elles sont déduites de la
+                        # pièce recouverte. On les affiche en lecture seule pour que
+                        # l'utilisateur voie ce qui partira au débit.
+                        joue.pop('width', None)
+                        joue.pop('length', None)
+                        joue.pop('thickness', None)
                         if enabled:
-                            cols = st.columns(4)
-                            with cols[0]:
-                                joue['width'] = st.number_input(
-                                    "Largeur du panneau (mm)",
-                                    value=float(joue.get('width', 0.0) or 0.0),
-                                    min_value=0.0,
-                                    step=1.0,
-                                    format="%.0f",
-                                    key=f"joue_width_{joue_key}_{idx}"
+                            _joue_fileur = float(selected_cab.get('door_props', {}).get('fileur_width', 0) or 0.0)
+                            _joue_geo = get_joue_dimensions(
+                                joue_key, selected_cab['dims'],
+                                bool(st.session_state.get('has_feet', False) or selected_cab.get('has_feet', False)),
+                                st.session_state.get('foot_height', 0.0),
+                                _joue_fileur,
+                            )
+                            st.caption(
+                                f"Recouvre : {JOUE_COVERED_PART.get(joue_key, '')} — "
+                                f"{_joue_geo['length']:.0f} × {_joue_geo['width']:.0f} × "
+                                f"{_joue_geo['thickness']:.0f} mm (L × l × ép.)"
+                                + (
+                                    f" · prolongée de {abs(_joue_geo['z_offset']):.0f} mm pour cacher les pieds"
+                                    if _joue_geo['z_offset'] else ""
                                 )
-                            with cols[1]:
-                                joue['length'] = st.number_input(
-                                    "Longueur du panneau (mm)",
-                                    value=float(joue.get('length', 0.0) or 0.0),
-                                    min_value=0.0,
-                                    step=1.0,
-                                    format="%.0f",
-                                    key=f"joue_length_{joue_key}_{idx}"
-                                )
-                            with cols[2]:
-                                joue['thickness'] = st.number_input(
-                                    "Épaisseur du panneau (mm)",
-                                    value=float(joue.get('thickness', 0.0) or 0.0),
-                                    min_value=0.0,
-                                    step=1.0,
-                                    format="%.0f",
-                                    key=f"joue_thickness_{joue_key}_{idx}"
-                                )
-                            with cols[3]:
-                                joue['material'] = st.text_input(
-                                    "Matière",
-                                    value=str(joue.get('material', 'Matière Corps')),
-                                    key=f"joue_material_{joue_key}_{idx}"
-                                )
+                            )
+                            joue['material'] = st.text_input(
+                                "Matière",
+                                value=str(joue.get('material', 'Matière Corps')),
+                                key=f"joue_material_{joue_key}_{idx}"
+                            )
 
                 with t_sh:
                     st.markdown("#### Configuration des Étagères")
@@ -3201,19 +3344,29 @@ with col1:
                         "Fond": (dim_fond_vertical, dim_fond_horizontal, t_fb),
                     }
 
-                    # Plinthe forcée dans la fiche de débit si les pieds sont activés.
-                    cabinet_has_feet = bool(st.session_state.get('has_feet', False) or selected_cab.get('has_feet', False))
+                    # Plinthe forcée dans la fiche de débit si les pieds sont
+                    # activés ET si ce caisson porte effectivement une plinthe :
+                    # un caisson superposé repose sur celui du dessous, et des
+                    # caissons accolés se partagent une plinthe unique rattachée
+                    # au premier d'entre eux.
+                    _feet_on = bool(st.session_state.get('has_feet', False) or selected_cab.get('has_feet', False))
+                    plinthe_group = (
+                        get_plinthe_for_cabinet(st.session_state['scene_cabinets'], idx)
+                        if _feet_on else None
+                    )
+                    cabinet_has_feet = bool(plinthe_group)
+                    plinthe_length = plinthe_group['length'] if plinthe_group else 0.0
                     if "Référence Pièce" in df.columns:
                         non_plinthe_df = df[~df["Référence Pièce"].astype(str).str.lower().str.contains("plinthe", na=False)].copy()
                     else:
                         non_plinthe_df = df.copy()
 
                     if cabinet_has_feet:
-                        plinthe_ref = f"Plinthe (C{idx})"
+                        plinthe_ref, _ = format_plinthe_labels(plinthe_group['indices'])
                         plinthe_row = {col: "" for col in non_plinthe_df.columns}
                         plinthe_row.update({
                             "Référence Pièce": plinthe_ref,
-                            "Longueur (mm)": max(0.0, L_traverse + 100.0),
+                            "Longueur (mm)": plinthe_length,
                             "Largeur (mm)": 80.0,
                             "Epaisseur": 19.0,
                             "Qté": 1,
@@ -3231,7 +3384,7 @@ with col1:
                         ref = str(row.get("Référence Pièce", ""))
                         ref_key = ref.split(" (")[0].strip()
                         if is_plinthe_reference(ref):
-                            df.at[row_idx, "Longueur (mm)"] = max(0.0, L_traverse + 100.0)
+                            df.at[row_idx, "Longueur (mm)"] = plinthe_length
                             df.at[row_idx, "Largeur (mm)"] = 80.0
                             df.at[row_idx, "Epaisseur"] = 19.0
                             df.at[row_idx, "Qté"] = 1
@@ -3290,8 +3443,8 @@ with col1:
                     if cabinet_has_feet:
                         plinthe_saved = {col: "" for col in edited_non_plinthe.columns}
                         plinthe_saved.update({
-                            "Référence Pièce": f"Plinthe (C{idx})",
-                            "Longueur (mm)": max(0.0, L_traverse + 100.0),
+                            "Référence Pièce": format_plinthe_labels(plinthe_group['indices'])[0],
+                            "Longueur (mm)": plinthe_length,
                             "Largeur (mm)": 80.0,
                             "Epaisseur": 19.0,
                             "Qté": 1,
@@ -3308,6 +3461,7 @@ with col1:
                     # Écrire les modifications dans l'état du caisson
                     st.session_state['scene_cabinets'][idx]['debit_data'] = edited_df.to_dict(orient="records")
 
+_sync_door_spans()
 all_calculated_parts, shelf_dims_cache = get_cached_project_parts()
 
 with col2:
@@ -3662,16 +3816,18 @@ with col2:
                                 rotation_pivot=(pivot_x, dy, dz)
                             ))
 
-            elif cab_render['door_props']['has_door']:
+            elif cab_render['door_props']['has_door'] and not cabinet_door_is_hidden(cab_render):
                 dp = cab_render['door_props']; gap = dp['door_gap'] * unit_factor; thk = dp.get('door_thickness', 19.0) * unit_factor; dy = o[1] - thk
-                if dp.get('door_model') == 'floor_length':
-                    cache_pied_drop = 80.0 * unit_factor
-                    # La porte cache-pieds descend de 80 mm sous le meuble.
-                    dH = H + cache_pied_drop - gap
-                    dz = o[2] - cache_pied_drop
-                else:
-                    dH = H - 2*gap
-                    dz = o[2] + gap
+                # Hauteur habillée par la porte : le caisson seul, ou les deux
+                # caissons superposés quand la porte leur est commune. Le modèle
+                # cache-pieds descend devant les pieds, 10 mm au-dessus du sol.
+                _dH_mm, _dz_mm = get_door_vertical_geometry(
+                    get_cabinet_door_height_raw(cab_render), dp,
+                    bool(st.session_state.get('has_feet', False) or cab_render.get('has_feet', False)),
+                    st.session_state.get('foot_height', 0.0)
+                )
+                dH = _dH_mm * unit_factor
+                dz = o[2] + _dz_mm * unit_factor
                 rot_angle = 45 if dp.get('door_opening')=='right' else -45
                 
                 # Vérifier si une zone est assignée
@@ -4036,20 +4192,27 @@ with col2:
                     ('dessous', 'bottom'),
                 ]
 
+                cab_render_has_feet = bool(st.session_state.get('has_feet', False) or cab_render.get('has_feet', False))
+                cab_render_foot_height = st.session_state.get('foot_height', 0.0)
+                cab_render_fileur_w = float(cab_render.get('door_props', {}).get('fileur_width', 0) or 0.0)
+
                 for joue_key, joue_side in joue_defs:
                     joue = cab_render['joues'].get(joue_key, {}) or {}
                     if not bool(joue.get('enabled', False)):
                         continue
 
-                    joue_w_mm = float(joue.get('width', 0.0) or 0.0)
-                    joue_l_mm = float(joue.get('length', 0.0) or 0.0)
-                    joue_t_mm = float(joue.get('thickness', 0.0) or 0.0)
-                    if joue_w_mm <= 0 or joue_l_mm <= 0 or joue_t_mm <= 0:
+                    joue_geo = get_joue_dimensions(
+                        joue_key, cab_render['dims'], cab_render_has_feet,
+                        cab_render_foot_height, cab_render_fileur_w
+                    )
+                    if joue_geo['width'] <= 0 or joue_geo['length'] <= 0 or joue_geo['thickness'] <= 0:
                         continue
 
-                    joue_w = joue_w_mm * unit_factor
-                    joue_l = joue_l_mm * unit_factor
-                    joue_t = joue_t_mm * unit_factor
+                    joue_w = joue_geo['width'] * unit_factor
+                    joue_l = joue_geo['length'] * unit_factor
+                    joue_t = joue_geo['thickness'] * unit_factor
+                    joue_x_offset = joue_geo['x_offset'] * unit_factor
+                    joue_z_offset = joue_geo['z_offset'] * unit_factor
                     is_preview = bool(joue.get('_preview'))
                     joue_color = "#666666" if is_preview else JOUES_COLOR
                     joue_opacity = 0.35 if is_preview else 0.75
@@ -4057,7 +4220,7 @@ with col2:
                     if joue_side == 'left':
                         fig3d.add_trace(cuboid_mesh_for(
                             joue_t, joue_w, joue_l,
-                            (o[0] - joue_t, o[1], o[2]),
+                            (o[0] - joue_t, o[1], o[2] + joue_z_offset),
                             color=joue_color,
                             opacity=joue_opacity,
                             name=f"Joue gauche {i}",
@@ -4066,7 +4229,7 @@ with col2:
                     elif joue_side == 'right':
                         fig3d.add_trace(cuboid_mesh_for(
                             joue_t, joue_w, joue_l,
-                            (o[0] + L, o[1], o[2]),
+                            (o[0] + L, o[1], o[2] + joue_z_offset),
                             color=joue_color,
                             opacity=joue_opacity,
                             name=f"Joue droite {i}",
@@ -4074,8 +4237,8 @@ with col2:
                         ))
                     elif joue_side == 'top':
                         fig3d.add_trace(cuboid_mesh_for(
-                            joue_w, joue_l, joue_t,
-                            (o[0], o[1], o[2] + H),
+                            joue_l, joue_w, joue_t,
+                            (o[0] + joue_x_offset, o[1], o[2] + H),
                             color=joue_color,
                             opacity=joue_opacity,
                             name=f"Joue dessus {i}",
@@ -4083,8 +4246,8 @@ with col2:
                         ))
                     elif joue_side == 'bottom':
                         fig3d.add_trace(cuboid_mesh_for(
-                            joue_w, joue_l, joue_t,
-                            (o[0], o[1], o[2] - joue_t),
+                            joue_l, joue_w, joue_t,
+                            (o[0] + joue_x_offset, o[1], o[2] - joue_t),
                             color=joue_color,
                             opacity=joue_opacity,
                             name=f"Joue dessous {i}",
